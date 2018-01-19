@@ -1,25 +1,12 @@
 # -*- coding: utf-8 -*-
-<<<<<<< HEAD
-# !/usr/bin/env python -3
-"""Data-storage containers for internal use."""
-import logging
-import itertools
-=======
 # !/usr/bin/env python3
 # TODO(Me): Add the rest of the docstrings.
 """Data-storage containers for internal use."""
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
 from collections import deque
 from collections.abc import MutableMapping
 from enum import Enum
 from typing import Any, NamedTuple, Union
 
-<<<<<<< HEAD
-# logging.basicConfig(level=logging.INFO)
-
-logging.basicConfig(level=None)
-=======
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
 
 # pylint: disable=C0326
 class ChannelOutputTypes(Enum):
@@ -57,12 +44,8 @@ class DirectOutputTypes(Enum):
 # pylint: disable=C0326
 class NoteOutputTypes(Enum):
     """Declare possible outputs for the Note object"""
-<<<<<<< HEAD
-    DIRECT = 0
-=======
     # yapf: disable
     DIRECT  = 0
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
     SQUARE1 = 1
     SQUARE2 = 2
     WAVE    = 3
@@ -76,10 +59,7 @@ class NoteOutputTypes(Enum):
 # pylint: disable=C0326
 class NotePhases(Enum):
     """Declare possible phases for the Note object"""
-<<<<<<< HEAD
-=======
     # yapf: disable
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
     INITIAL = 0
     ATTACK  = 1
     DECAY   = 2
@@ -89,48 +69,12 @@ class NotePhases(Enum):
     # yapf: enable
 
 
-<<<<<<< HEAD
-class Note(NamedTuple):  # pylint: disable=R0903
-    """Container representing a single note in the AGB sound engine"""
-    enabled: bool
-    fmod_channel: int
-    note_number: bytes
-    frequency: int
-    velocity: bytes
-    patch_number: bytes
-    parent_channel: int
-    sample_id: str
-    unknown_value: bytes
-    note_off: bool
-    note_phase: NotePhases
-    output_type: NoteOutputTypes
-    env_step: float
-    env_destination: float
-    env_positon: float
-    env_attenuation: bytes
-    env_decay: bytes
-    env_sustain: bytes
-    env_release: bytes
-    wait_ticks: float
-    key: str
-
-
-class Collection(object):
-=======
 # pylint: disable=C0123
 class Collection(MutableMapping):
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
     """Imitation of the VB6 `Collection` data-container"""
     __slots__ = ('_storage', '_key_store', '_list', 'log')
 
     def __init__(self, *iterables):
-<<<<<<< HEAD
-        self.log = logging.getLogger(name='{m_name}.{c_name}'.format(
-            m_name=__name__, c_name=self.__class__.__name__))
-        # self.log.info('Instantiated new Collection')
-        # self.log.debug('*iterables: %s', iterables)
-=======
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
         self._storage = deque()
         self._key_store = {}
         self._list = None
@@ -193,22 +137,6 @@ class Collection(MutableMapping):
         if not iterables:
             return None
         for iterable in iterables:
-<<<<<<< HEAD
-            for item in iterable:
-                if isinstance(iterable, dict):
-                    self.add(iterable[item], item)
-                else:
-                    self.add(item)
-
-    @property
-    def count(self):
-        """Return the number of items in the collection."""
-        return len(self._storage)
-
-    # yapf: disable
-    def add(self, item: Any, key: str = None, before: int = 0,
-            after: int = 0) -> None: # yapf: enable
-=======
             if type(iterable) == dict:
                 for item in iterable.items():
                     key, value = item
@@ -231,7 +159,6 @@ class Collection(MutableMapping):
     def add(self, item: Any, key: str = None, before: int = None,
             after: int = None) -> None:
         # yapf: enable
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
         """Add an item to storage.
 
         Note:
@@ -243,35 +170,6 @@ class Collection(MutableMapping):
             after: index to insert the item after.
 
         """
-<<<<<<< HEAD
-        if before == after and before is not 0:
-            raise ValueError('Simultaneous usage of "before" and "after"')
-        # self.log.info('Adding "%s" with key reference "%s".', item, key)
-        if key and key not in self._key_store:
-            self._key_store[key] = item
-        if not before and not after:
-            # self.log.debug('Appending item.')
-            self._storage.append(item)
-        else:
-            if before:
-                self._storage.insert(before-1, item)
-            else:
-                self._storage.insert(after+1, item)
-
-    def item(self, key: Union[str, int]) -> Any:
-        """Get an item from storage via its index or key reference."""
-        self.log.info('Getting item via reference "%s".', key)
-        out = self._key_store.get(key)
-        if out is None:
-            out = self._storage[key]
-            if out in self._key_store:
-                out = self._key_store.get(key)
-        return out
-
-    def remove(self, key: Union[str, int]) -> None:
-        """Remove an item from storage via its index or key reference."""
-        self.log.info('Removing item via reference "%s".', key)
-=======
         key = str(key)
         if key and key not in self._key_store:
             self._key_store[key] = item
@@ -472,4 +370,3 @@ class Note(NamedTuple):
     env_positon:     float = 0.0
     note_phase:      NotePhases = NotePhases.INITIAL
     # yapf: enable
->>>>>>> 825e82705536130e0b50125b88a06c55e9f3979f
