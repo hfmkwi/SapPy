@@ -1,22 +1,15 @@
 # -*- coding: utf-8 -*-
 # !/usr/bin/env/python -3
+# pylint: disable=C0123,W0212
 """Provides File IO for Sappy
-
-Attributes:
-    CWD: current working directory
 
 Todos:
     TODO(Me) Update all function docstrings
 """
-import logging
 import os
 import os.path
 
 #__all__ = ['Error', 'File', 'open_file', 'open_new_file']
-
-logging.basicConfig(level=logging.INFO)
-
-CWD = os.getcwd()
 
 
 class Error(Exception):
@@ -45,7 +38,6 @@ class File(object):  # pylint: disable=R0902
         Attributes:
             _file_table (dict): A table holding references to all open files
                 stored under their respective IDs.
-            log (Logger): instance-level logger.
             file_id (int): file number for developer identification.
             file_obj (IOWrapper): root file object used for read/write
                 operations.
@@ -55,11 +47,6 @@ class File(object):  # pylint: disable=R0902
 
         """
         # Initiate logger
-        self.log = logging.getLogger(name='{m_name}.{c_name}'.format(
-            m_name=__name__, c_name=self.__class__.__name__))
-        self.log.info('Instantiated new File')
-        self.log.debug('file_path: %s, file_id %s, python id: %s', file_path,
-                       file_id, id(self))
         self._file_path = file_path  # Set file name for local access
 
         # Define file ID
@@ -74,8 +61,6 @@ class File(object):  # pylint: disable=R0902
             self._file_obj = open(self.file_path, 'rb+')
 
         self._write_offset = self._read_offset = 0  # Set read and write offset
-        self.log.info('Opened file "%s" with ID "%s"', self.file_path,
-                      self.file_id)
 
     def __enter__(self):
         return self
@@ -101,10 +86,8 @@ class File(object):  # pylint: disable=R0902
     @read_offset.setter
     def read_offset(self, offset: int = -1) -> None:
         if offset is None:
-            self.log.debug('Default value; no change to read address')
             offset = self.read_offset
         elif offset < 0 or offset > self.size:
-            self.log.debug('Attempted to move read head to invalid address')
             offset = 0
         self._read_offset = offset
 
@@ -121,7 +104,6 @@ class File(object):  # pylint: disable=R0902
     @write_offset.setter
     def write_offset(self, offset: int = -1) -> None:
         if offset is None:
-            self.log.debug('Default value; no change to write address')
             offset = self.write_offset
         elif offset < 0:
             offset = 0
@@ -142,10 +124,8 @@ class File(object):  # pylint: disable=R0902
         """
         if not file_path:
             raise ValueError('empty file path')
-        if os.path.isabs(file_path):
-            if not (os.path.exists(file_path) and os.path.isfile(file_path)):
-                return True
-        return False
+        return os.path.isabs(file_path) and not (os.path.exists(file_path) and
+                                                 os.path.isfile(file_path))
 
     @staticmethod
     def gba_rom_pointer_to_offset(pointer: int) -> int:
@@ -167,6 +147,11 @@ class File(object):  # pylint: disable=R0902
             return -1
         return pointer - 0x8000000
 
+    @staticmethod
+    def get_file_from_id(file_id: int) -> 'File':
+        """Retrieve a file object from it's internal ID."""
+        return __class__._file_table.get(file_id)
+
     def _check_id(self, file_id: int) -> bool:
         """Check if the specified file ID is valid and unused
 
@@ -180,18 +165,9 @@ class File(object):  # pylint: disable=R0902
             Error: 'invalid file number'
 
         """
-        self.log.debug('Checking validity of File ID')
         if file_id is not None and not 0 <= file_id < 256:
             raise Error('invalid file number', 2)
-        if file_id not in self._file_table and isinstance(file_id, int):
-            self.log.debug('ID "%s" is unused', file_id)
-            return True
-        else:
-            if file_id is None:
-                self.log.debug('ID is default')
-            else:
-                self.log.debug('ID "%s" is in use', file_id)
-            return False
+        return file_id not in self._file_table and type(file_id) == int
 
     def _close(self) -> None:
         """Close a file by ID
@@ -202,10 +178,7 @@ class File(object):  # pylint: disable=R0902
 
         """
         self._file_obj.close()
-        self.log.info('File "%s" successfully closed', self.file_path)
         self._file_table.pop(self._file_id)
-        self.log.debug('ID "%s" freed', self.file_id)
-        self.log.debug('Deleting self')
         del self
 
     def _get(self, offset: int = None) -> bytes:
@@ -222,12 +195,8 @@ class File(object):  # pylint: disable=R0902
         if offset is None:
             offset = self.read_offset
         self.read_offset = offset
-        self.log.debug('Moving read head to address %s', hex(offset))
         self._file_obj.seek(offset)
         byte = self._file_obj.read(1)
-        self.log.debug('%s read from file at %s', hex(byte[0]),
-                       hex(self.read_offset))
-        self.log.debug('data: %s', byte)
         self.read_offset = self._file_obj.tell()
         return byte
 
@@ -241,14 +210,10 @@ class File(object):  # pylint: disable=R0902
             Error: 'all files are currently in use'
 
         """
-        self.log.info('Getting unused file number...')
-        self.log.debug('_used_ids: %s', self._file_table)
         for file_id in range(256):
             if file_id not in self._file_table:
-                self.log.debug('ID "%s" is unused', file_id)
                 self._file_table[file_id] = 1
                 return file_id
-            self.log.debug('ID "%s" in use', file_id)
         raise Error(message="all files are currently in use", code=1)
 
     def _put(self, data: bytes, offset: int = None) -> None:
@@ -268,11 +233,8 @@ class File(object):  # pylint: disable=R0902
         if offset is None:
             offset = self.write_offset
         self.write_offset = offset
-        self.log.debug('Moving write head to %s', hex(offset))
         self._file_obj.seek(offset)
-        self.log.debug('data: %s', data.hex())
         self._file_obj.write(data)
-        self.log.debug('%s written to file at %s', hex(data[0]), hex(offset))
         self.write_offset = self._file_obj.tell()
         assert self.write_offset > offset or offset is not None
 
@@ -285,7 +247,6 @@ class File(object):  # pylint: disable=R0902
         """
         if not self._check_id(file_id):
             file_id = self.file_id
-        self.log.info('Closing file with ID "%s"', file_id)
         if self.file_id != file_id:
             file = self._file_table.get(file_id)
             file.close(file.file_id)
@@ -302,7 +263,6 @@ class File(object):  # pylint: disable=R0902
 
         """
         self.write_offset = offset
-        self.log.debug('Writing %s to file', hex(data[0]))
         self._put(data, offset)
 
     def write_big_endian(self, width: int, data: int,
@@ -317,11 +277,8 @@ class File(object):  # pylint: disable=R0902
 
         """
         self.write_offset = offset
-        self.log.info('Writing %s in big-endian width %s to file', hex(data),
-                      width)
         for i in range(width):
             byte = bytes([(data // 16**(i * 2)) % 256])
-            self.log.debug('loop %s, byte: %s', i, hex(byte[0]))
             self.write_byte(byte)
 
     def write_little_endian(self, width: int, data: int,
@@ -336,11 +293,8 @@ class File(object):  # pylint: disable=R0902
 
         """
         self.write_offset = offset
-        self.log.info('Writing %s in little-endian width %s to file at %s',
-                      hex(data), width, hex(self.read_offset))
         for i in range(width - 1, -1, -1):
             byte = bytes([(data // 16**(i * 2)) % 256])
-            self.log.debug('loop %s, byte: %s', i, hex(byte[0]))
             self.write_byte(byte)
 
     def write_string(self, data: str, offset: int = None) -> None:
@@ -352,7 +306,6 @@ class File(object):  # pylint: disable=R0902
                 if None, defaults to the write head's current position
         """
         self.write_offset = offset
-        self.log.info('Writing "%s" to file at %s', data, hex(self.read_offset))
         for char in data:
             self.write_byte(bytes([ord(char)]))
 
@@ -387,7 +340,6 @@ class File(object):  # pylint: disable=R0902
             byte = self.read_byte()
             vlq = vlq * 2**7 + (byte[0] % 0x80)
             ret_len += 1
-            self.log.debug('vlq: %s, ret_len: %s', hex(vlq), ret_len)
             if ret_len == 4 or byte[0] < 0x80:
                 break
         return vlq
@@ -439,8 +391,6 @@ class File(object):  # pylint: disable=R0902
         """
         self.read_offset = offset
         out = []
-        self.log.info('Reading string length %s from file at %s', length,
-                      hex(offset))
         for i in range(length):  # pylint: disable=unused-variable
             out.append(chr(self.read_byte()[0]))
         return ''.join(out)
