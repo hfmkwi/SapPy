@@ -105,3 +105,6 @@ test.py
 
 # IntelliJ IDE config
 .idea/*
+
+# ctags
+tags
