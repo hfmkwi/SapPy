@@ -1,0 +1,158 @@
+!_TAG_FILE_FORMAT	2	/extended format; --format=1 will not append ;" to lines/
+!_TAG_FILE_SORTED	1	/0=unsorted, 1=sorted, 2=foldcase/
+!_TAG_OUTPUT_MODE	u-ctags	/u-ctags or e-ctags/
+!_TAG_PROGRAM_AUTHOR	Universal Ctags Team	//
+!_TAG_PROGRAM_NAME	Universal Ctags	/Derived from Exuberant Ctags/
+!_TAG_PROGRAM_URL	https://ctags.io/	/official site/
+!_TAG_PROGRAM_VERSION	0.0.0	/47726595/
+ATTACK	containers.py	/^    ATTACK  = 1$/;"	v	class:NotePhases
+Channel	containers.py	/^class Channel(NamedTuple):$/;"	c
+ChannelOutputTypes	containers.py	/^class ChannelOutputTypes(Enum):$/;"	c
+ChannelQueue	containers.py	/^class ChannelQueue(Collection, metaclass=MutableMapping):$/;"	c
+Collection	containers.py	/^class Collection(MutableMapping):$/;"	c
+DECAY	containers.py	/^    DECAY   = 2$/;"	v	class:NotePhases
+DIRECT	containers.py	/^    DIRECT       = 0$/;"	v	class:ChannelOutputTypes
+DIRECT	containers.py	/^    DIRECT  = 0$/;"	v	class:DirectOutputTypes
+DIRECT	containers.py	/^    DIRECT  = 0$/;"	v	class:NoteOutputTypes
+DRUMKIT	containers.py	/^    DRUMKIT      = 9$/;"	v	class:ChannelOutputTypes
+Direct	containers.py	/^class Direct(NamedTuple):$/;"	c
+DirectOutputTypes	containers.py	/^class DirectOutputTypes(Enum):$/;"	c
+DirectQueue	containers.py	/^class DirectQueue(Collection):$/;"	c
+DrumKit	containers.py	/^class DrumKit(NamedTuple):$/;"	c
+DrumKitQueue	containers.py	/^class DrumKitQueue(Collection):$/;"	c
+Event	containers.py	/^class Event(NamedTuple):$/;"	c
+EventQueue	containers.py	/^class EventQueue(Collection):$/;"	c
+INITIAL	containers.py	/^    INITIAL = 0$/;"	v	class:NotePhases
+Instrument	containers.py	/^class Instrument(NamedTuple):$/;"	c
+InstrumentQueue	containers.py	/^class InstrumentQueue(Collection):$/;"	c
+KeyMap	containers.py	/^class KeyMap(NamedTuple):$/;"	c
+KeyMapQueue	containers.py	/^class KeyMapQueue(Collection):$/;"	c
+MULTI_SAMPLE	containers.py	/^    MULTI_SAMPLE = 8$/;"	v	class:ChannelOutputTypes
+NOISE	containers.py	/^    NOISE        = 4$/;"	v	class:ChannelOutputTypes
+NOISE	containers.py	/^    NOISE   = 4$/;"	v	class:DirectOutputTypes
+NOISE	containers.py	/^    NOISE   = 4$/;"	v	class:NoteOutputTypes
+NOTEOFF	containers.py	/^    NOTEOFF = 5$/;"	v	class:NotePhases
+NULL	containers.py	/^    NULL         = 255$/;"	v	class:ChannelOutputTypes
+Note	containers.py	/^class Note(NamedTuple):$/;"	c
+NoteID	containers.py	/^class NoteID(NamedTuple):$/;"	c
+NoteIDQueue	containers.py	/^class NoteIDQueue(Collection):$/;"	c
+NoteOutputTypes	containers.py	/^class NoteOutputTypes(Enum):$/;"	c
+NotePhases	containers.py	/^class NotePhases(Enum):$/;"	c
+NoteQueue	containers.py	/^class NoteQueue(Collection):$/;"	c
+RELEASE	containers.py	/^    RELEASE = 4$/;"	v	class:NotePhases
+SQUARE1	containers.py	/^    SQUARE1      = 1$/;"	v	class:ChannelOutputTypes
+SQUARE1	containers.py	/^    SQUARE1 = 1$/;"	v	class:DirectOutputTypes
+SQUARE1	containers.py	/^    SQUARE1 = 1$/;"	v	class:NoteOutputTypes
+SQUARE2	containers.py	/^    SQUARE2      = 2$/;"	v	class:ChannelOutputTypes
+SQUARE2	containers.py	/^    SQUARE2 = 2$/;"	v	class:DirectOutputTypes
+SQUARE2	containers.py	/^    SQUARE2 = 2$/;"	v	class:NoteOutputTypes
+SUSTAIN	containers.py	/^    SUSTAIN = 3$/;"	v	class:NotePhases
+Sample	containers.py	/^class Sample(NamedTuple):$/;"	c
+SampleDataBytes	containers.py	/^    class SampleDataBytes(MutableSequence):$/;"	c	class:Sample
+SampleQueue	containers.py	/^class SampleQueue(Collection):$/;"	c
+Subroutine	containers.py	/^class Subroutine(NamedTuple):$/;"	c
+SubroutineQueue	containers.py	/^class SubroutineQueue(Collection):$/;"	c
+UNK5	containers.py	/^    UNK5         = 5$/;"	v	class:ChannelOutputTypes
+UNK5	containers.py	/^    UNK5    = 5$/;"	v	class:DirectOutputTypes
+UNK5	containers.py	/^    UNK5    = 5$/;"	v	class:NoteOutputTypes
+UNK6	containers.py	/^    UNK6         = 6$/;"	v	class:ChannelOutputTypes
+UNK6	containers.py	/^    UNK6    = 6$/;"	v	class:DirectOutputTypes
+UNK6	containers.py	/^    UNK6    = 6$/;"	v	class:NoteOutputTypes
+UNK7	containers.py	/^    UNK7         = 7$/;"	v	class:ChannelOutputTypes
+UNK7	containers.py	/^    UNK7    = 7$/;"	v	class:DirectOutputTypes
+UNK7	containers.py	/^    UNK7    = 7$/;"	v	class:NoteOutputTypes
+WAVE	containers.py	/^    WAVE         = 3$/;"	v	class:ChannelOutputTypes
+WAVE	containers.py	/^    WAVE    = 3$/;"	v	class:DirectOutputTypes
+WAVE	containers.py	/^    WAVE    = 3$/;"	v	class:NoteOutputTypes
+__contains__	containers.py	/^    def __contains__(self, item: Any) -> bool:$/;"	m	class:Collection
+__delitem__	containers.py	/^        def __delitem__(self, index: int):$/;"	m	class:Sample.SampleDataBytes
+__delitem__	containers.py	/^    def __delitem__(self, key: Union[int, str]) -> None:$/;"	m	class:Collection
+__eq__	containers.py	/^    def __eq__(self, other) -> bool:$/;"	m	class:Collection
+__getitem__	containers.py	/^        def __getitem__(self, index: int):$/;"	m	class:Sample.SampleDataBytes
+__getitem__	containers.py	/^    def __getitem__(self, key: Union[int, str]) -> Any:$/;"	m	class:Collection
+__init__	containers.py	/^        def __init__(self, data: bytearray = None) -> None:$/;"	m	class:Sample.SampleDataBytes
+__init__	containers.py	/^    def __init__(self, *iterables):$/;"	m	class:Collection
+__iter__	containers.py	/^        def __iter__(self):$/;"	m	class:Sample.SampleDataBytes
+__iter__	containers.py	/^    def __iter__(self) -> 'File':$/;"	m	class:Collection
+__len__	containers.py	/^        def __len__(self):$/;"	m	class:Sample.SampleDataBytes
+__len__	containers.py	/^    def __len__(self) -> int:$/;"	m	class:Collection
+__ne__	containers.py	/^    def __ne__(self, other) -> bool:$/;"	m	class:Collection
+__next__	containers.py	/^        def __next__(self):$/;"	m	class:Sample.SampleDataBytes
+__next__	containers.py	/^    def __next__(self) -> Any:$/;"	m	class:Collection
+__repr__	containers.py	/^    def __repr__(self) -> str:$/;"	m	class:Collection
+__setitem__	containers.py	/^        def __setitem__(self, index: int, value: int) -> None:$/;"	m	class:Sample.SampleDataBytes
+__setitem__	containers.py	/^    def __setitem__(self, key: str, value: Any) -> None:$/;"	m	class:Collection
+__slots__	containers.py	/^    __slots__ = ('_storage', '_key_store', '_list', 'log')$/;"	v	class:Collection	file:
+__str__	containers.py	/^    def __str__(self) -> str:$/;"	m	class:Collection
+_initiate_storage	containers.py	/^    def _initiate_storage(self, iterables) -> None:$/;"	m	class:Collection
+add	containers.py	/^    def add(self, assign_direct: int, key: str = None) -> None:$/;"	m	class:KeyMapQueue
+add	containers.py	/^    def add(self, enabled: bool, fmod_channel: int, note_number: bytes,$/;"	m	class:NoteQueue
+add	containers.py	/^    def add(self, event_queue_pointer: int, key: str = None) -> None:$/;"	m	class:SubroutineQueue
+add	containers.py	/^    def add(self, item: Any, key: str = None, before: int = None,$/;"	m	class:Collection
+add	containers.py	/^    def add(self, key: str = None) -> None:$/;"	m	class:ChannelQueue
+add	containers.py	/^    def add(self, key: str = None) -> None:$/;"	m	class:DirectQueue
+add	containers.py	/^    def add(self, key: str = None) -> None:$/;"	m	class:DrumKitQueue
+add	containers.py	/^    def add(self, key: str = None) -> None:$/;"	m	class:InstrumentQueue
+add	containers.py	/^    def add(self, key: str = None) -> None:$/;"	m	class:SampleQueue
+add	containers.py	/^    def add(self, note_id: bytes, key: str = None) -> None:$/;"	m	class:NoteIDQueue
+add	containers.py	/^    def add(self, ticks: int, command_byte: bytes, param1: bytes,$/;"	m	class:EventQueue
+append	containers.py	/^        def append(self, value: Any) -> None:$/;"	m	class:Sample.SampleDataBytes
+clear	containers.py	/^    def clear(self):$/;"	m	class:Collection
+count	containers.py	/^    count = property(fget=__len__)$/;"	v	class:Collection
+directs	containers.py	/^    directs:  DirectQueue = DirectQueue()$/;"	v	class:Instrument
+drum_tune_key	containers.py	/^    drum_tune_key:   bytes = b'0x3C'$/;"	v	class:Direct
+enabled	containers.py	/^    enabled:               bool       = True$/;"	v	class:Channel
+env_attenuation	containers.py	/^    env_attenuation: bytes = b'0x00'$/;"	v	class:Direct
+env_decay	containers.py	/^    env_decay:       bytes = b'0x00'$/;"	v	class:Direct
+env_destination	containers.py	/^    env_destination: float = 0.0$/;"	v	class:Note
+env_positon	containers.py	/^    env_positon:     float = 0.0$/;"	v	class:Note
+env_release	containers.py	/^    env_release:     bytes = b'0x00'$/;"	v	class:Direct
+env_step	containers.py	/^    env_step:        float = 0.0$/;"	v	class:Note
+env_sustain	containers.py	/^    env_sustain:     bytes = b'0x00'$/;"	v	class:Direct
+event_queue	containers.py	/^    event_queue:           EventQueue = EventQueue()$/;"	v	class:Channel
+fixed_pitch	containers.py	/^    fixed_pitch:     bool  = False$/;"	v	class:Direct
+fmod_sample	containers.py	/^    fmod_sample:       int       = None$/;"	v	class:Sample
+frequency	containers.py	/^    frequency:         int       = None$/;"	v	class:Sample
+gb1	containers.py	/^    gb1:             bytes = b'0x00'$/;"	v	class:Direct
+gb2	containers.py	/^    gb2:             bytes = b'0x00'$/;"	v	class:Direct
+gb3	containers.py	/^    gb3:             bytes = b'0x00'$/;"	v	class:Direct
+gb4	containers.py	/^    gb4:             bytes = b'0x00'$/;"	v	class:Direct
+gb_wave	containers.py	/^    gb_wave:           bool      = None$/;"	v	class:Sample
+get	containers.py	/^    get = __getitem__$/;"	v	class:Collection
+insert	containers.py	/^        def insert(self, index: int, value: Any) -> None:$/;"	m	class:Sample.SampleDataBytes
+item	containers.py	/^    item = __getitem__$/;"	v	class:Collection
+items	containers.py	/^    def items(self) -> list:$/;"	m	class:Collection
+key	containers.py	/^    key:               str       = None$/;"	v	class:Sample
+key_maps	containers.py	/^    key_maps: KeyMapQueue = KeyMapQueue()$/;"	v	class:Instrument
+keys	containers.py	/^    def keys(self) -> list:$/;"	m	class:Collection
+loop_enable	containers.py	/^    loop_enable:       bool      = None$/;"	v	class:Sample
+loop_pointer	containers.py	/^    loop_pointer:          int        = 0$/;"	v	class:Channel
+loop_start	containers.py	/^    loop_start:        int       = None$/;"	v	class:Sample
+main_volume	containers.py	/^    main_volume:           bytes      = b'100'$/;"	v	class:Channel
+mute	containers.py	/^    mute:                  bool       = False$/;"	v	class:Channel
+note_off	containers.py	/^    note_off:        bool  = False$/;"	v	class:Note
+note_phase	containers.py	/^    note_phase:      NotePhases = NotePhases.INITIAL$/;"	v	class:Note
+notes	containers.py	/^    notes:                 NoteQueue  = NoteQueue()$/;"	v	class:Channel
+panning	containers.py	/^    panning:               int        = 0x40$/;"	v	class:Channel
+patch_number	containers.py	/^    patch_number:          bytes      = b'0x00'$/;"	v	class:Channel
+pitch_bend	containers.py	/^    pitch_bend:            bytes      = b'0x40'$/;"	v	class:Channel
+pitch_bend_range	containers.py	/^    pitch_bend_range:      int        = 2$/;"	v	class:Channel
+program_counter	containers.py	/^    program_counter:       int        = 1$/;"	v	class:Channel
+raw0	containers.py	/^    raw0:            bytes = b'0x00'$/;"	v	class:Direct
+raw1	containers.py	/^    raw1:            bytes = b'0x00'$/;"	v	class:Direct
+read_sample_data_from_file	containers.py	/^    def read_sample_data_from_file(self, file_id: int, t_size: int):$/;"	m	class:Sample
+remove	containers.py	/^    remove = __delitem__$/;"	v	class:Collection
+reverse	containers.py	/^    reverse:         bool  = False$/;"	v	class:Direct
+sample_data	containers.py	/^    sample_data:       str       = None$/;"	v	class:Sample
+sample_data_array	containers.py	/^    sample_data_array: bytearray = SampleDataBytes()$/;"	v	class:Sample
+sample_data_length	containers.py	/^    def sample_data_length(self):$/;"	m	class:Sample
+sample_id	containers.py	/^    sample_id:       str   = '0'$/;"	v	class:Direct
+save_sample_data_to_file	containers.py	/^    def save_sample_data_to_file(self, file_id: int):$/;"	m	class:Sample
+size	containers.py	/^    size:              int       = None$/;"	v	class:Sample
+sub_count_at_loop	containers.py	/^    sub_count_at_loop:     int        = 1$/;"	v	class:Channel
+subroutine_counter	containers.py	/^    subroutine_counter:    int        = 1$/;"	v	class:Channel
+subroutines	containers.py	/^    subroutines:           SubroutineQueue = SubroutineQueue()$/;"	v	class:Channel
+sustain	containers.py	/^    sustain:               bool       = False$/;"	v	class:Channel
+transpose	containers.py	/^    transpose:             int        = 0$/;"	v	class:Channel
+values	containers.py	/^    def values(self) -> list:$/;"	m	class:Collection
+wait_ticks	containers.py	/^    wait_ticks:            float      = -1.0$/;"	v	class:Channel

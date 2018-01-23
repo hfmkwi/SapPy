@@ -3,11 +3,11 @@
 # pylint: disable=C0123,C0326,R0901,R0903,R0913,R0914,W0221
 """Data-storage containers for internal use."""
 from collections import deque
-from collections.abc import MutableMapping, MutableSequence
 from enum import Enum
-from typing import Any, NamedTuple, Union
+from typing import Any, MutableMapping, MutableSequence, NamedTuple, Union
 
 from fileio import File
+
 
 class ChannelOutputTypes(Enum):
     """Possible output types for each sound channel"""
@@ -71,6 +71,7 @@ class Collection(MutableMapping):
     __slots__ = ('_storage', '_key_store', '_list', 'log')
 
     def __init__(self, *iterables):
+        super().__init__()
         self._storage = deque()
         self._key_store = {}
         self._list = None
@@ -90,11 +91,11 @@ class Collection(MutableMapping):
                 raise KeyError('Invalid Key.')
             del self._storage[key]
 
-    def __eq__(self, other):
+    def __eq__(self, other) -> bool:
         return repr(self) == repr(other) and \
             self.items() == other.items()
 
-    def __ne__(self, other):
+    def __ne__(self, other) -> bool:
         return repr(self) != repr(other) and \
             self.items() != other.items()
 
@@ -108,7 +109,7 @@ class Collection(MutableMapping):
         else:
             return self._key_store.get(key)
 
-    def __iter__(self) -> object:
+    def __iter__(self) -> 'File':
         self._list = self._storage.copy()
         return self
 
@@ -281,6 +282,7 @@ class NoteQueue(Collection):
 
 class NoteIDQueue(Collection):
     """LIFO container holding internal note IDs."""
+
     def add(self, note_id: bytes, key: str = None) -> None:
         note = NoteID(key=key, note_id=note_id)
         super().add(note, key)
@@ -288,17 +290,18 @@ class NoteIDQueue(Collection):
 
 class SampleQueue(Collection):
     """LIFO container holding instrument samples."""
+
     def add(self, key: str = None) -> None:
         sample = Sample(key=key)
         super().add(sample, key)
 
+
 class SubroutineQueue(Collection):
     """LIFO container holding AGB subroutines."""
+
     def add(self, event_queue_pointer: int, key: str = None) -> None:
         subroutine = Subroutine(
-            key=key,
-            event_queue_pointer=event_queue_pointer
-        )
+            key=key, event_queue_pointer=event_queue_pointer)
         super().add(subroutine, key)
 
 
@@ -311,6 +314,7 @@ class Channel(NamedTuple):
     return_pointer:        int
     track_length_in_bytes: int
     track_pointer:         int
+    output_type:           ChannelOutputTypes
     enabled:               bool       = True
     mute:                  bool       = False
     sustain:               bool       = False
@@ -325,7 +329,6 @@ class Channel(NamedTuple):
     sub_count_at_loop:     int        = 1
     subroutine_counter:    int        = 1
     transpose:             int        = 0
-    output_type:           ChannelOutputTypes
     event_queue:           EventQueue = EventQueue()
     notes:                 NoteQueue  = NoteQueue()
     subroutines:           SubroutineQueue = SubroutineQueue()
@@ -456,7 +459,7 @@ class Sample(NamedTuple):
 
         def __setitem__(self, index: int, value: int) -> None:
             if index > len(self._storage):
-                self._storage.extend([0]*index-len(self._storage))
+                self._storage.extend([0] * index - len(self._storage))
             if not self._storage:
                 self._storage.extend([0])
             self._storage[index] = value
@@ -488,7 +491,7 @@ class Sample(NamedTuple):
         """Read sample data as bytes from AGB rom."""
         file = File.get_file_from_id(file_id)
         sample_data = bytearray()
-        for i in range(t_size): # pylint: disable=W0612
+        for i in range(t_size):  # pylint: disable=W0612
             sample_data.append(file.read_byte())
         self.sample_data_array = self.SampleDataBytes(sample_data)
 
@@ -497,6 +500,7 @@ class Sample(NamedTuple):
         file = File.get_file_from_id(file_id)
         for byte in self.sample_data_array:
             file.write_byte(byte)
+
 
 class Subroutine(NamedTuple):
     """Internal AGB subroutine ID."""
