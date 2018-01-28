@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# pylint: disable=C0123,C0326,R0901,R0903,R0913,R0914,W0221
+#-*- coding: utf-8 -*-
+# pylint: disable=C0103,C0123,C0326,R0901,R0903,R0913,R0914,W0221,W0622
 """Data-storage containers for internal use."""
 from collections import deque
 from enum import Enum
-from typing import (Any, ItemsView, KeysView, MutableMapping, MutableSequence,
-                    NamedTuple, Union, ValuesView)
+from typing import (Any, ItemsView, KeysView, MutableSequence, NamedTuple,
+                    Union, ValuesView)
 
 from fileio import File
 
@@ -77,133 +77,85 @@ class NotePhases(Enum):
     # yapf: enable
 
 
-class Collection(MutableMapping):
+class Collection(deque):
     """Imitation of the VB6 `Collection` data-container"""
     __slots__ = ('_storage', '_key_store', '_list', 'log')
 
-    def __init__(self, *iterables):
+    def __init__(self):
         super().__init__()
-        self._storage = deque()
         self._key_store = {}
         self._list = None
-        self._initiate_storage(iterables)
 
     def __contains__(self, item: Any) -> bool:
-        if type(item) is int:
-            return item in self._storage
-        return item in self._key_store
+        return super().__contains__(item) or item in self._key_store
 
-    def __delitem__(self, key: Union[int, str]) -> None:
-        if key in self._key_store:
-            del self._key_store[key]
-            self._storage.remove(key)
-        else:
-            if type(key) == str:
-                raise KeyError('Invalid Key.')
-            del self._storage[key]
+    def __delitem__(self, item: int) -> bool:
+        out = super().__getitem__(item)
+        super().__delitem__(item)
+        if out in self._key_store:
+            del self._key_store[out]
 
     def __eq__(self, other) -> bool:
-        return repr(self) == repr(other) and \
-            self.items() == other.items()
+        return super().__eq__(other) and self.items() == other.items()
 
-    def __getitem__(self, key: Union[int, str]) -> Any:
-        if type(key) == str and key not in self._key_store:
-            return None
-        elif type(key) == int:
-            if self._storage[int(key)] not in self._key_store:
-                return self._storage[key]
-            return self._key_store.get(self._storage[key])
-        else:
-            return self._key_store.get(key)
+    def __getitem__(self, key: int) -> Any:
+        out = super().__getitem__(key)
+        if out not in self._key_store:
+            return out
+        return self._key_store[out]
 
     def __hash__(self):
-        return hash((tuple(self._storage), tuple(self._key_store.items())))
-
-    def __iter__(self) -> 'File':
-        self._list = self._storage.copy()
-        return self
-
-    def __len__(self) -> int:
-        return len(self._storage)
+        return hash((super().__iter__(), tuple(self._key_store)))
 
     def __ne__(self, other) -> bool:
-        return repr(self) != repr(other) and \
-            self.items() != other.items()
+        return super().__ne__(other) and self.items() != other.items()
 
-    def __next__(self) -> Any:
-        if not self._list:
-            raise StopIteration
-        return self._list.popleft()
+    def clear(self):
+        """Clear all of storage and the keystore."""
+        super().clear()
+        self._key_store.clear()
 
-    def __repr__(self) -> str:
-        return self.__repr__()
-
-    def __setitem__(self, key: int, value: Any) -> None:
-        self._storage[key] = value
-
-    def __str__(self) -> str:
-        return str(list(self._storage))
-
-    def _initiate_storage(self, iterables) -> None:
-        for iterable in iterables:
-            if type(iterable) == dict:
-                for item in iterable.items():
-                    key, value = item
-                    self.add(value, key)
-            else:
-                self._storage.extend(iterable)
-
-    def keys(self) -> KeysView:
-        """Keys in keystore"""
-        return self._key_store.keys()
-
-    def values(self) -> ValuesView:
-        """Values in keystore"""
-        return self._key_store.values()
+    def item(self, key: str):
+        """Get value from key"""
+        return self._key_store[key]
 
     def items(self) -> ItemsView:
         """Key/Value pairs in keystore"""
         return self._key_store.items()
 
-    # yapf: disable
-    def add(self, item: Any, key: str = None, bef: int = None,
-            aft: int = None) -> None:
-        # yapf: enable
-        """Add an item to storage.
+    def keys(self) -> KeysView:
+        """Keys in keystore"""
+        return self._key_store.keys()
 
-        Note:
-            Neither `before` nor `after` can be used in conjunction.
+    def key_append(self, item: Any, key: str) -> None:
+        """Append an item to end of storage.
 
         Args:
-            key: A string reference to the item's index.
-            bef: index to insert the item before.
-            aft: index to insert the item after.
+        key: A string reference to the item's index.
 
         """
-        if key and key not in self._key_store:
-            self._key_store[key] = item
-            item = key
-        elif key is not None:
+        if key in self._key_store:
             raise KeyError('Key in use.')
-        if not bef and not aft:
-            self._storage += [item]
-        else:
-            if bef == aft and bef is not None:
-                raise ValueError('Simultaneous usage of "before" and "after"')
-            elif bef:
-                self._storage.insert(bef - 1, item)
-            else:
-                self._storage.insert(aft + 1, item)
+        self._key_store[key] = item
+        self.append(key)
 
-    def clear(self):
-        """Clear all of storage and the keystore."""
-        self._storage.clear()
-        self._key_store.clear()
+    def key_insert(self, item: Any, key: str, ind: int = None):
+        """Insert an item at the specified index within storage."""
+        if key in self._key_store:
+            raise KeyError('Key in use.')
+        self._key_store[key] = item
+        self.insert(ind, key)
 
-    get = __getitem__
-    item = __getitem__
-    remove = __delitem__
-    count = property(fget=__len__)
+    def remove(self, key: str):
+        ind = super().index(key)
+        super().__delitem__(ind)
+        del self._key_store[key]
+
+    def values(self) -> ValuesView:
+        """Values in keystore"""
+        return self._key_store.values()
+
+    count = property(fget=deque.__len__)
 
 
 class ChannelQueue(Collection):
@@ -211,7 +163,7 @@ class ChannelQueue(Collection):
 
     def add(self, key: str = None) -> None:
         channel = Channel(key=key)
-        super().add(channel)
+        self.append(channel)
 
 
 class DirectQueue(Collection):
@@ -219,7 +171,7 @@ class DirectQueue(Collection):
 
     def add(self, key: str = None) -> None:
         direct = Direct(key=key)
-        super().add(direct, key)
+        self.key_append(direct, key)
 
 
 class DrumKitQueue(Collection):
@@ -227,7 +179,7 @@ class DrumKitQueue(Collection):
 
     def add(self, key: str = None) -> None:
         drumkit = DrumKit(key=key)
-        super().add(drumkit, key)
+        self.key_append(drumkit, key)
 
 
 class EventQueue(Collection):
@@ -244,7 +196,7 @@ class EventQueue(Collection):
             param2       = param2,
             param3       = param3
         )
-        super().add(event)
+        self.append(event)
     # yapf: enable
 
 
@@ -253,7 +205,7 @@ class InstrumentQueue(Collection):
 
     def add(self, key: str = None) -> None:
         instrument = Instrument(key=key)
-        super().add(instrument, key)
+        super().key_append(instrument, key)
 
 
 class KeyMapQueue(Collection):
@@ -261,7 +213,7 @@ class KeyMapQueue(Collection):
 
     def add(self, assign_dct: int, key: str = None) -> None:
         kmap = KeyMap(key=key, assign_dct=assign_dct)
-        super().add(kmap, key)
+        super().key_append(kmap, key)
 
 
 class NoteQueue(Collection):
@@ -292,7 +244,7 @@ class NoteQueue(Collection):
             env_sustain     = env_sustain,
             env_release     = env_release,
             wait_ticks=wait_ticks)
-        super().add(note, key)
+        super().key_append(note, key)
         # yapf: enable
 
 
@@ -301,7 +253,7 @@ class NoteIDQueue(Collection):
 
     def add(self, note_id: int, key: str = None) -> None:
         note = NoteID(key=key, note_id=note_id)
-        super().add(note, key)
+        super().key_append(note, key)
 
 
 class SampleQueue(Collection):
@@ -309,7 +261,7 @@ class SampleQueue(Collection):
 
     def add(self, key: str = None) -> None:
         sample = Sample(key=key)
-        super().add(sample, key)
+        super().key_append(sample, key)
 
 
 class SubroutineQueue(Collection):
@@ -318,7 +270,7 @@ class SubroutineQueue(Collection):
     def add(self, event_queue_pointer: int, key: str = None) -> None:
         subroutine = Subroutine(
             key=key, event_queue_pointer=event_queue_pointer)
-        super().add(subroutine, key)
+        super().key_append(subroutine, key)
 
 
 class Channel(NamedTuple):
