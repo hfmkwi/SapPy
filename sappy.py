@@ -1,6 +1,6 @@
-# -*- coding: utf-8 -*-
-# !/usr/bin/env python3
-# pylint: disable=C0326, R0902, R0903,W0511
+#!/usr/bin/python3
+#-*- coding: utf-8 -*-
+# pylint: disable=C0103, C0326, R0902, R0903, R0913, W0511
 """Main file."""
 from enum import Enum
 from logging import INFO, basicConfig, getLogger
@@ -22,207 +22,238 @@ class SongOutputTypes(Enum):
 class RawMidiEvent(NamedTuple):
     """MIDI event container."""
     # yapf: disable
-    raw_delta:  int
-    ticks:      int
-    event_code: int
+    d_raw:    int = int()
+    ticks:    int = int()
+    evt_code: int = int()
     # yapf: enable
 
 
 class Decoder(object):
     """Decoder/interpreter for Sappy code."""
-    ERROR_CHECKING = False
-    GB_SQUARE_MULTI = 0.5
-    GB_WAVE_MULTI = 0.5
-    GB_WAVE_BASE_FREQUENCY = 880
-    GB_NOISE_MULTI = 0.5
+    DEBUG = False
+    GB_SQ_MULTI = 0.5
+    GB_WAV_MULTI = 0.5
+    GB_WAV_BASE_FREQ = 880
+    GB_NSE_MULTI = 0.5
     SAPPY_PPQN = 24
 
     basicConfig(level=INFO)
     log = getLogger(name=__name__)
 
     def __init__(self):
-        # yapf: disable
-        self.playing:                  bool                        = bool()
-        self.recording:                bool                        = bool()
-        self.ear_piercer_count:        int                         = int()
-        self.instrument_table_pointer: int                         = int()
-        self.layer:                    int                         = int()
-        self.song_list_pointer:        int                         = int()
-        self.song_number:              int                         = int()
-        self.song_pointer:             int                         = int()
-        self.total_ticks:              int                         = int()
-        self.total_msecs:              int                         = int()
-        self._global_volume:           int                         = 100
-        self.last_tick:                float                       = float()
-        self.tick_counter:             float                       = float()
-        self.ear_piercers:             list                        = list()
-        self.midi_drum_map:            list                        = list()
-        self.midi_patch_map:           list                        = list()
-        self.midi_patch_table:         list                        = list()
-        self.file_path:                str                         = str()
-        self.midi_file:                File                        = None
-        self.wfile:                    File                        = None
-        self.sappy_channels:           ChannelQueue[Channel]       = ChannelQueue()
-        self.dir_head:                 DirectHeader                = DirectHeader()
-        self.directs:                  DirectQueue[Direct]         = DirectQueue()
-        self.drm_head:                 DrumKitHeader               = DrumKitHeader()
-        self.drumkits:                 DrumKitQueue[DrumKit]       = DrumKitQueue()
-        self.ins_head:                 InstrumentHeader            = InstrumentHeader()
-        self.instruments:              InstrumentQueue[Instrument] = InstrumentQueue()
-        self.note_array:               List[Note]                  = [Note(*[None] * 16)] * 32
-        self.mul_head:                 MultiHeader                 = MultiHeader()
-        self.agb_head:                 NoiseHeader                 = NoiseHeader()
-        self.note_queue:               NoteQueue[Note]             = NoteQueue()
-        self.previous_event:           RawMidiEvent                = RawMidiEvent(None, None, None)
-        self.smp_head:                 SampleHeader                = SampleHeader()
-        self.sample_pool:              SampleQueue[Sample]         = SampleQueue()
-        # yapf: enable
+        self.playing:     bool                        = bool()
+        self.record:      bool                        = bool()
+        self.ist_tbl_ptr: int                         = int()
+        self.layer:       int                         = int()
+        self.sng_lst_ptr: int                         = int()
+        self.sng_num:     int                         = int()
+        self.sng_ptr:     int                         = int()
+        self.ttl_ticks:   int                         = int()
+        self.ttl_msecs:   int                         = int()
+        self._gbl_vol:    int                         = 100
+        self.prv_tick:    float                       = float()
+        self.tick_ctr:    float                       = float()
+        self.rip_ears:    list                        = list()
+        self.mdrum_map:   list                        = list()
+        self.mpatch_map:  list                        = list()
+        self.mpatch_tbl:  list                        = list()
+        self.fpath:       str                         = str()
+        self.mfile:       File                        = None
+        self.wfile:       File                        = None
+        self.channels:    ChannelQueue[Channel]       = ChannelQueue()
+        self.dct_head:    DirectHeader                = DirectHeader()
+        self.directs:     DirectQueue[Direct]         = DirectQueue()
+        self.drm_head:    DrumKitHeader               = DrumKitHeader()
+        self.drmkits:     DrumKitQueue[DrumKit]       = DrumKitQueue()
+        self.ins_head:    InstrumentHeader            = InstrumentHeader()
+        self.insts:       InstrumentQueue[Instrument] = InstrumentQueue()
+        self.note_arr:    List[Note]                  = [Note()] * 32
+        self.mul_head:    MultiHeader                 = MultiHeader()
+        self.gb_head:     NoiseHeader                 = NoiseHeader()
+        self.note_q:      NoteQueue[Note]             = NoteQueue()
+        self.last_evt:    RawMidiEvent                = RawMidiEvent()
+        self.smp_head:    SampleHeader                = SampleHeader()
+        self.smp_pool:    SampleQueue[Sample]         = SampleQueue()
 
     @property
     def global_volume(self) -> int:
-        return self._global_volume
+        return self._gbl_vol
 
     @global_volume.setter
-    def global_volume(self, volume: int) -> None:
-        self._global_volume = volume
+    def global_volume(self, vol: int) -> None:
+        self._gbl_vol = vol
 
     @staticmethod
-    def direct_exists(self, directs_collection: DirectQueue,
-                      direct_id: int) -> bool:
-        return str(direct_id) in directs_collection
+    def dct_exists(dcts: DirectQueue, dct_id: int) -> bool:
+        return str(dct_id) in dcts
 
     @staticmethod
-    def flip_long(value: int) -> int:
-        return int.from_bytes(
-            value.to_bytes(4, byteorder='big'), byteorder='little')
+    def flip_lng(val: int) -> int:
+        return int.from_bytes(val.to_bytes(4, 'big'), 'little')
 
     @staticmethod
-    def flip_int(value: int) -> int:
-        return int.from_bytes(
-            value.to_bytes(2, byteorder='big'), byteorder='little')
+    def flip_int(val: int) -> int:
+        return int.from_bytes(val.to_bytes(2, 'big'), 'little')
 
-    def add_ear_piercer(self, instrument_id: int):
-        self.ear_piercers[self.ear_piercer_count] = instrument_id
-        self.ear_piercer_count += 1
+    @staticmethod
+    def set_direct(queue: Collection, dct_key: str, inst_head: InstrumentHeader,
+                   dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
+        # yapf: disable
+        queue.directs[dct_key] = queue.directs[dct_key].replace(
+            drum_key   = inst_head.drum_pitch,
+            t_output     = DirectTypes(inst_head.channel & 7),
+            env_attn = dct_head.attack,
+            env_decay       = dct_head.hold,
+            env_sustain     = dct_head.sustain,
+            env_release     = dct_head.release,
+            raw0            = dct_head.b0,
+            raw1            = dct_head.b1,
+            gb1             = gb_head.b2,
+            gb2             = gb_head.b3,
+            gb3             = gb_head.b4,
+            gb4             = gb_head.b5,
+            fixed_pitch     = (inst_head.channel & 0x08) == 0x08,
+            reverse         = (inst_head.channel & 0x10) == 0x10,
+            sample_id       = queue.directs[dct_key].sample_id,
+            key             = queue.directs[dct_key].key
+        )
+        # yapf: enable
 
-    def buffer_event(self, event_code: str, ticks: int) -> None:
-        self.midi_file: File
-        if not self.recording or self.midi_file.file_id != 42:
+    @staticmethod
+    def write_var_len(ch: int, val: int) -> None:
+        buf = ch & 0x7F
+        while val // 128 > 0:
+            val //= 128
+            buf |= 0x80
+            buf = (buf * 256) | (val & 0x7F)
+        file = File.from_id(ch)
+        while True:
+            file.write_byte(buf & 255)
+            if not buf & 0x80:
+                break
+            buf //= 256
+
+    def add_ear_piercer(self, inst_id: int):
+        self.rip_ears.append(inst_id)
+        # self.rip_ears[self.rip_ear_cnt] = inst_id
+        # self.rip_ear_cnt += 1
+
+    def buffer_evt(self, evt_code: str, ticks: int) -> None:
+        self.mfile: File
+        if not self.record or self.mfile.file_id != 42:
             return
-        event = RawMidiEvent(
+        d_raw=ticks - self.last_evt.ticks
+        evt_code=int(evt_code)
+        evt = RawMidiEvent(
             ticks=ticks,
-            raw_delta=ticks - self.previous_event.ticks,
-            event_code=int(event_code))
-        self.write_var_len(self.midi_file.file_id, event.raw_delta)
-        self.midi_file.write_string(event.event_code)
-        self.previous_event = event
+            d_raw=d_raw,
+            evt_code=evt_code)
+        self.write_var_len(self.mfile.file_id, evt.d_raw)
+        self.mfile.write_string(evt.evt_code)
+        self.last_evt = evt
 
-    def clear_midi_patch_map(self):
-        self.midi_patch_map.clear()
-        self.midi_drum_map.clear()
-        self.ear_piercers.clear()
-        self.ear_piercer_count = 0
+    def clear_mpatch_map(self):
+        self.mpatch_map.clear()
+        self.mdrum_map.clear()
+        self.rip_ears.clear()
 
-    def drum_kit_exists(self, patch: int) -> bool:
-        return str(patch) in self.drumkits
+    def drm_exists(self, patch: int) -> bool:
+        return str(patch) in self.drmkits
 
-    def event_processor_timer(self, msec: int) -> bool:
-        self.total_msecs += msec
-        if self.tick_counter:
+    def evt_processor_timer(self, msec: int) -> bool:
+        self.ttl_msecs += msec
+        if self.tick_ctr:
             for i in range(32):
-                note = self.note_array[i]
-                if note.enabled and note.wait_ticks > 0:
-                    self.note_array[i] = note._replace(
-                        wait_ticks=note.wait_ticks -
-                        (self.tick_counter - self.last_tick))
-                if note.wait_ticks <= 0 and note.enabled and not note.note_off:
-                    if not self.sappy_channels[note.parent_channel].sustain:
-                        self.note_array[i] = note._replace(note_off=True)
-            for i in range(len(self.sappy_channels)):
-                if not self.sappy_channels[i].enabled:
+                note = self.note_arr[i]
+                if note.enable and note.wait_ticks > 0:
+                    w_ticks = note.wait_ticks - (self.tick_ctr - self.prv_tick)
+                    self.note_arr[i] = note._replace()
+                if note.wait_ticks <= 0 and note.enable and not note.note_off:
+                    if not self.channels[note.parent].sustain:
+                        self.note_arr[i] = note._replace(note_off=True)
+            for i in range(len(self.channels)):
+                if not self.channels[i].enable:
                     continue
-                channel = self.sappy_channels[i]
-                for ep in self.ear_piercers:
-                    if ep == channel.patch_number:
-                        self.sappy_channels[i] = channel._replace(mute=True)
+                channel = self.channels[i]
+                for ep in self.rip_ears:
+                    if ep == channel.patch_num:
+                        self.channels[i] = channel._replace(mute=True)
 
     def free_note(self) -> int:
         for i in range(32):
-            if not self.note_array[i].enabled:
-                return i
+            if not self.note_arr[i].enable:
+                note = i
+        return note
 
-    def get_sample(self, queue: Collection, direct_key: str,
-                   dir_head: DirectHeader, smp_head: SampleHeader,
-                   use_read_string: bool) -> None:
-        dq = queue.directs
-        dq[direct_key] = dq[direct_key]._replace(
-            sample_id=dir_head.sample_header)
-        sid = dq[direct_key].sample_id
-        if not self.sample_exists(sid):
-            self.sample_pool.add(str(sid))
-            if dq[direct_key].output_type == DirectOutputTypes.DIRECT:
-                self.smp_head = read_sample_head(
-                    File.gba_rom_pointer_to_offset(sid))
-                if use_read_string:
-                    sample_data = self.wfile.read_string(smp_head.size)
+    def get_smp(self, q: Collection, dct_key: str, dct_head: DirectHeader,
+                smp_head: SampleHeader, use_readstr: bool) -> None:
+        dct_q = q.directs
+        dct_q[dct_key] = dct_q[dct_key]._replace(
+            sample_id=dct_head.smp_head)
+        s_id = dct_q[dct_key].sample_id
+        if not self.smp_exists(s_id):
+            self.smp_pool.add(str(s_id))
+            if dct_q[dct_key].t_output == DirectTypes.DIRECT:
+                self.smp_head = rd_smp_head(
+                    File.gba_ptr_to_addr(s_id))
+                if use_readstr:
+                    smp_data = self.wfile.rd_str(smp_head.size)
                 else:
-                    sample_data = self.wfile.read_offset
-                self.sample_pool[str(sid)] = self.sample_pool[str(
-                    sid)]._replace(
-                        size=smp_head.size,
-                        frequency=smp_head.frequency,
-                        loop_start=smp_head.loop,
-                        loop_enable=smp_head.flags > 0,
-                        gb_wave=False,
-                        sample_data=sample_data)
+                    smp_data = self.wfile.rd_addr
+                self.smp_pool[str(s_id)] = self.smp_pool[str(s_id)]._replace(
+                    size=smp_head.size,
+                    freq=smp_head.freq,
+                    loop_start=smp_head.loop,
+                    loop_enable=smp_head.flags > 0,
+                    gb_wave=False,
+                    smp_data=smp_data
+                )
             else:
-                tsi = self.wfile.read_string(
-                    16, File.gba_rom_pointer_to_offset(sid))
-                sample_data = []
+                tsi = self.wfile.rd_str(
+                    16, File.gba_ptr_to_addr(s_id))
+                smp_data = []
                 for ai in range(32):
                     bi = ai % 2
-                    sample_data.append(
-                        chr(
-                            int((((
-                                0 if tsi[ai // 2:ai // 2 + 1] ==
-                                "" else ord(tsi[ai // 2:ai // 2 + 1])) // 16**bi
-                                 ) % 16) * self.GB_WAVE_BASE_FREQUENCY * 16)))
-                sample_data = "".join(sample_data)
-                self.sample_pool[str(sid)] = self.sample_pool[str(sid)].replace(
+                    newvariable73 = tsi[ai // 2:ai // 2 + 1]
+                    if not newvariable73:
+                        smp_pt = 0
+                    else:
+                        smp_pt = ord(newvariable73)
+                    smp_pt = chr(smp_pt // 16 ** bi % 16 * self.GB_WAV_BASE_FREQ*16)
+                    smp_data.append(smp_pt)
+                smp_data = "".join(smp_data)
+                self.smp_pool[str(s_id)] = self.smp_pool[str(s_id)].replace(
                     size=32,
-                    frequency=self.GB_WAVE_BASE_FREQUENCY,
+                    freq=self.GB_WAV_BASE_FREQ,
                     loop_start=0,
                     loop_enable=True,
                     gb_wave=True,
-                    sample_data=sample_data)
+                    smp_data=smp_data
+                )
 
-    def get_sample_with_multi(self, queue: Collection, direct_key: str,
-                              dir_head: DirectHeader, smp_head: SampleHeader,
-                              use_read_string: bool) -> None:
-        self.get_sample(queue, direct_key, dir_head, smp_head, use_read_string)
+    get_multi_smp = get_smp
 
-    def instrument_exists(self, patch: int) -> bool:
-        return str(patch) in self.instruments
+    def inst_exists(self, patch: int) -> bool:
+        return str(patch) in self.insts
 
-    def key_map_exists(self, key_map_collection: KeyMapQueue,
-                       key_map_id: int) -> bool:
-        return str(key_map_id) in key_map_collection
+    @staticmethod
+    def kmap_exists(kmaps: KeyMapQueue, kmap_id: int) -> bool:
+        return str(kmap_id) in kmaps
 
-    def note_belongs_to_channel(self, note_id: bytes, channel_id: int) -> bool:
-        return self.note_array[note_id].parent_channel == channel_id
+    def note_belongs_to_channel(self, note_id: bytes, chnl_id: int) -> bool:
+        return self.note_arr[note_id].parent == chnl_id
 
     def patch_exists(self, lp: int) -> bool:
-        return str(lp) in self.directs or self.instrument_exists(
-            lp) or self.drum_kit_exists(lp)
+        lp = str(lp)
+        return lp in self.directs or self.inst_exists(lp) or self.drm_exists(lp)
 
     # yapf: disable
-    def play_song(self, file_path: str, song_number: int,
-                  song_list_pointer: int = None, want_to_record: bool = False,
-                  record_to: str = "midiout.mid"):
+    def play_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None,
+                  record: bool = False, record_to: str = "midiout.mid"):
         # yapf: enable
-        self.file_path = file_path
-        self.song_list_pointer = song_list_pointer
-        self.song_number = song_number
+        self.fpath = fpath
+        self.sng_lst_ptr = sng_list_ptr
+        self.sng_num = sng_num
 
         if self.playing:
             # TODO: raise SONG_STOP
@@ -230,243 +261,198 @@ class Decoder(object):
 
         self.ins_head = InstrumentHeader
         self.drm_head = DrumKitHeader
-        self.dir_head = DirectHeader
+        self.dct_head = DirectHeader
         self.smp_head = SampleHeader
         self.mul_head = MultiHeader
-        self.agb_head = NoiseHeader
+        self.gb_head = NoiseHeader
 
-        self.sappy_channels.clear()
-        self.drumkits.clear()
-        self.sample_pool.clear()
-        self.instruments.clear()
+        self.channels.clear()
+        self.drmkits.clear()
+        self.smp_pool.clear()
+        self.insts.clear()
         self.directs.clear()
-        self.note_queue.clear()
+        self.note_q.clear()
         for i in range(32):
-            self.note_array[i] = self.note_array[i]._replace(enabled=False)
+            self.note_arr[i] = Note(enable=False)
 
-        self.wfile = open_file(self.file_path, 1)
-        pointer = self.wfile.read_gba_rom_pointer(
-            self.song_list_pointer + song_number * 8)
-        self.song_pointer = pointer
-        self.layer = self.wfile.read_little_endian(4)
-        pbyte = self.wfile.read_byte(pointer)
-        self.instrument_table_pointer = self.wfile.read_gba_rom_pointer(
-            pointer + 4)
+        self.wfile = open_file(self.fpath, 1)
+        ptr = self.wfile.rd_gba_ptr(self.sng_lst_ptr + sng_num * 8)
+        self.sng_ptr = ptr
+        self.layer = self.wfile.rd_ltendian(4)
+        pbyte = self.wfile.rd_byte(ptr)
+        self.ist_tbl_ptr = self.wfile.rd_gba_ptr(ptr + 4)
 
         # TODO: raise LOADING_0
 
         xta = SubroutineQueue()
         for i in range(0, pbyte + 1):
-            loop_offset = -1
-            self.sappy_channels.add()
-            pc = self.wfile.read_gba_rom_pointer(pointer + 4 + i * 4)
-            self.sappy_channels[i] = self.sappy_channels[i]._replace(
-                track_pointer=pc)
+            loop_addr = -1
+            pgm_ctr = self.wfile.rd_gba_ptr(ptr + 4 + i * 4)
+            self.channels.add()
             xta.clear()
             while True:
-                control = self.wfile.read_byte(pc)
-                if control >= 0x00 and control <= 0xB0 or control in (0xCE,
-                                                                      0xCF,
-                                                                      0xB4):
-                    pc += 1
-                elif control == 0xB9:
-                    pc += 4
-                elif control >= 0xB5 and control <= 0xCD:
-                    pc += 2
-                elif control == 0xB2:
-                    loop_offset = self.wfile.read_gba_rom_pointer()
-                    pc += 5
+                ctl_byte = self.wfile.rd_byte(pgm_ctr)
+                if ctl_byte >= 0x00 and ctl_byte <= 0xB0 or ctl_byte in (
+                        0xCE, 0xCF, 0xB4):
+                    pgm_ctr += 1
+                elif ctl_byte == 0xB9:
+                    pgm_ctr += 4
+                elif ctl_byte >= 0xB5 and ctl_byte <= 0xCD:
+                    pgm_ctr += 2
+                elif ctl_byte == 0xB2:
+                    loop_addr = self.wfile.rd_gba_ptr()
+                    pgm_ctr += 5
                     break
-                elif control == 0xB3:
-                    xta.add(self.wfile.read_gba_rom_pointer())
-                    pc += 5
-                elif control >= 0xD0 and control <= 0xFF:
-                    pc += 1
-                    while self.wfile.read_byte() < 0x80:
-                        pc += 1
-                print(hex(pc), hex(control))
-                if control == 0xb1:
+                elif ctl_byte == 0xB3:
+                    xta.add(self.wfile.rd_gba_ptr())
+                    pgm_ctr += 5
+                elif ctl_byte >= 0xD0 and ctl_byte <= 0xFF:
+                    pgm_ctr += 1
+                    while self.wfile.rd_byte() < 0x80:
+                        pgm_ctr += 1
+                print(hex(pgm_ctr), hex(ctl_byte))
+                if ctl_byte == 0xb1:
                     break
 
             cticks = 0
             c_ei = 0
-            lc = 0xbe
+            ctrl = 0xbe
             lln: List = [None] * 66
             llv: List = [None] * 66
             lla: List = [None] * 66
             lp = 0
             src2 = 1
             insub = 0
-            t_r = 0
-            self.sappy_channels[i] = self.sappy_channels[i]._replace(
-                track_pointer=-1)
+            transpose = 0
+            self.channels[i] = self.channels[i]._replace(track_ptr=-1)
+            channel = self.channels[i]
+            input()
             while True:
-                self.wfile.read_offset = pc
-                print(pc)
-                if pc >= loop_offset and self.sappy_channels[i].loop_pointer == -1 and loop_offset != -1:
-                    self.sappy_channels[i] = self.sappy_channels[i]._replace(
-                        loop_pointer=self.sappy_channels[i].event_queue.count +
-                        1)
-                control = self.wfile.read_byte()
-                if (control != 0xb9 and control >= 0xb5 and
-                        control < 0xc5) or control == 0xcd:
-                    d = self.wfile.read_byte()
-                    if control == 0xbc: t_r = signed_byte_to_integer(d)
-                    if control == 0xbd: lp = d
-                    if control in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd): lc = control
-                    self.sappy_channels[i].event_queue.add(
-                        cticks, control, d, 0, 0)
-                elif control > 0xc4 and control < 0xcf:
-                    self.sappy_channels[i].event_queue.add(
-                        cticks, control, 0, 0, 0)
-                elif control == 0xb9:
-                    d = self.wfile.read_byte()
-                    e = self.wfile.read_byte()
-                    f = self.wfile.read_byte()
-                    self.sappy_channels[i].event_queue.add(
-                        cticks, control, d, e, f)
-                    pc += 4
-                elif control == 0xb4:
+                self.wfile.rd_addr = pgm_ctr
+                print(pgm_ctr)
+                if pgm_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
+                    self.channels[i] = channel._replace(loop_ptr=channel.evt_queue.count + 1)
+                ctl_byte = self.wfile.rd_byte()
+                if (ctl_byte != 0xb9 and ctl_byte >= 0xb5 and
+                        ctl_byte < 0xc5) or ctl_byte == 0xcd:
+                    cmd_arg = self.wfile.rd_byte()
+                    if ctl_byte == 0xbc:
+                        transpose = sbyte_to_int(cmd_arg)
+                    elif ctl_byte == 0xbd:
+                        lp = cmd_arg
+                    elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
+                        ctrl = ctl_byte
+                    self.channels[i].evt_queue.add(cticks, ctl_byte, cmd_arg,
+                                                     0, 0)
+                elif ctl_byte > 0xc4 and ctl_byte < 0xcf:
+                    self.channels[i].evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+                elif ctl_byte == 0xb9:
+                    cmd_arg = self.wfile.rd_byte()
+                    e = self.wfile.rd_byte()
+                    f = self.wfile.rd_byte()
+                    self.channels[i].evt_queue.add(cticks, ctl_byte, cmd_arg,
+                                                     e, f)
+                    pgm_ctr += 4
+                elif ctl_byte == 0xb4:
                     if insub == 1:
-                        pc = rpc  # pylint: disable=E0601
+                        pgm_ctr = rpc  # pylint: disable=E0601
                         in_sub = 0
                     else:
-                        pc += 1
-                elif control == 0xb3:
-                    rpc = pc + 5
+                        pgm_ctr += 1
+                elif ctl_byte == 0xb3:
+                    rpc = pgm_ctr + 5
                     in_sub = 1
-                    pc = self.wfile.read_gba_rom_pointer()
-                elif control >= 0xcf and control <= 0xff:
-                    pc += 1
-                    lc = control
+                    pgm_ctr = self.wfile.rd_gba_ptr()
+                elif ctl_byte >= 0xcf and ctl_byte <= 0xff:
+                    pgm_ctr += 1
+                    ctrl = ctl_byte
                     g = False
                     nc = 0
                     while not g:
-                        d = self.wfile.read_byte()
-                        if d >= 0x80:
+                        cmd_arg = self.wfile.rd_byte()
+                        if cmd_arg >= 0x80:
                             if not nc:
-                                pn = lln[nc] + t_r
-                            self.sappy_channels[i].event_queue.add(
-                                cticks, control, pn, llv[nc], lla[nc])
+                                pn = lln[nc] + transpose
+                            self.channels[i].evt_queue.add(
+                                cticks, ctl_byte, pn, llv[nc], lla[nc])
                             g = True
                         else:
-                            lln[nc] = d
-                            pc += 1
-                            e = self.wfile.read_byte()
+                            lln[nc] = cmd_arg
+                            pgm_ctr += 1
+                            e = self.wfile.rd_byte()
                             if e < 0x80:
                                 llv[nc] = e
-                                pc += 1
-                                f = self.wfile.read_byte()
+                                pgm_ctr += 1
+                                f = self.wfile.rd_byte()
                                 if f >= 0x80:
                                     f = lla[nc]
                                     g = True
                                 else:
                                     lla[nc] = f
-                                    pc += 1
+                                    pgm_ctr += 1
                                     nc += 1
                             else:
                                 e = llv[nc]
                                 f = lla[nc]
                                 g = True
-                            pn = d + t_r
-                            self.sappy_channels[i].event_queue.add(
-                                cticks, control, pn, e, f)
+                            pn = cmd_arg + transpose
+                            self.channels[i].evt_queue.add(
+                                cticks, ctl_byte, pn, e, f)
                         if not self.patch_exists(lp):
-                            ins_head = read_instrument_head(
-                                1, self.instrument_table_pointer + lp * 12)
+                            ins_head = rd_inst_head(
+                                1, self.ist_tbl_ptr + lp * 12)
                             if ins_head.channel & 0x80 == 0x80:
-                                drm_head = read_drumkit_head(1)
-                                ins_head = read_instrument_head(
+                                drm_head = rd_drmkit_head(1)
+                                ins_head = rd_inst_head(
                                     1,
-                                    self.wfile.gba_rom_pointer_to_offset(
-                                        drm_head.direct_table + pn * 12))
-                                dir_head = read_direct_head(1)
-                                agb_head = read_noise_head(
+                                    self.wfile.gba_ptr_to_addr(
+                                        drm_head.dct_tbl + pn * 12))
+                                dct_head = rd_dct_head(1)
+                                gb_head = rd_nse_head(
                                     1,
-                                    self.wfile.gba_rom_pointer_to_offset(
-                                        drm_head.direct_table + pn * 12 + 2))
-                                self.drumkits.add(str(lp))
-                                self.drumkits[str(lp)].add(str(pn))
-                                self.set_stuff(self.drumkits[str(lp)], str(pn),
-                                               self.ins_head, self.dir_head,
-                                               self.agb_head)
-                                if self.instruments[str(lp)].directs[str(
-                                        cdr)].output_type in (
-                                            DirectOutputTypes.DIRECT,
-                                            DirectOutputTypes.WAVE):
-                                    self.get_sample(self.drumkits[str(lp)],
-                                                    str(pn), self.dir_head,
+                                    self.wfile.gba_ptr_to_addr(
+                                        drm_head.dct_tbl + pn * 12 + 2))
+                                self.drmkits.add(str(lp))
+                                self.drmkits[str(lp)].add(str(pn))
+                                self.set_direct(self.drmkits[str(lp)], str(pn),
+                                               self.ins_head, self.dct_head,
+                                               self.gb_head)
+                                if self.insts[str(lp)].directs[str(
+                                        cdr)].t_output in (
+                                            DirectTypes.DIRECT,
+                                            DirectTypes.WAVE):
+                                    self.get_smp(self.drmkits[str(lp)],
+                                                    str(pn), self.dct_head,
                                                     self.smp_head, False)
 
-    def sample_exists(self, sample_id: int) -> bool:
-        return str(sample_id) in self.sample_pool
+    def smp_exists(self, smp_id: int) -> bool:
+        return str(smp_id) in self.smp_pool
 
-    def set_midi_patch_map(self, index: int, instrument: int,
-                           transpose: int) -> None:
-        self.midi_patch_map[index] = instrument
-        self.midi_patch_table[index] = transpose
+    def set_mpatch_map(self, ind: int, inst: int, transpose: int) -> None:
+        self.mpatch_map[ind] = inst
+        self.mpatch_tbl[ind] = transpose
 
-    def set_midi_drum_map(self, index: int, new_drum: int) -> None:
-        self.midi_drum_map[index] = new_drum
+    def set_mdrum_map(self, ind: int, new_drum: int) -> None:
+        self.mdrum_map[ind] = new_drum
 
-    def set_stuff(self, queue: Collection, direct_key: str,
-                  ins_head: InstrumentHeader, dir_head: DirectHeader,
-                  agb_head: NoiseHeader) -> None:
-        # yapf: disable
-        queue.directs[direct_key] = queue.directs[direct_key].replace(
-            drum_tune_key   = ins_head.drum_pitch,
-            output_type     = DirectOutputTypes(ins_head.channel & 7),
-            env_attenuation = dir_head.attack,
-            env_decay       = dir_head.hold,
-            env_sustain     = dir_head.sustain,
-            env_release     = dir_head.release,
-            raw0            = dir_head.b0,
-            raw1            = dir_head.b1,
-            gb1             = agb_head.b2,
-            gb2             = agb_head.b3,
-            gb3             = agb_head.b4,
-            gb4             = agb_head.b5,
-            fixed_pitch     = (ins_head.channel & 0x08) == 0x08,
-            reverse         = (ins_head.channel & 0x10) == 0x10,
-            sample_id       = queue.directs[direct_key].sample_id,
-            key             = queue.directs[direct_key].key
-        )
-        # yapf: enable
 
     def stop_song(self):
-        File.get_file_from_id(1).close()
-        File.get_file_from_id(2).close()
+        File.from_id(1).close()
+        File.from_id(2).close()
         # TODO: disable event processor
         # TODO: close sound channel
         # TODO: close MIDI channel
-        if self.recording:
+        if self.record:
             self.log.debug('test')
-            self.recording = False
-            self.midi_file = 42
-            with File.get_file_from_id(self.midi_file) as file:
-                file.write_byte(0x0A)
-                file.write_byte(0xFF)
-                file.write_byte(0x2F)
-                file.write_byte(0x00)
-                track_length = file.size - 22
-                self.log.debug('StopSong(): Track length: %s, total ticks: %s',
-                               track_length, self.total_ticks)
-                file.write_little_endian(
-                    unpack(self.flip_long(track_length), 0x13))
+            self.record = False
+            self.mfile = File.from_id(42)
+            self.mfile.write_little_endian(0x0AFF2F00)
+            trk_len = self.mfile.size - 22
+            self.log.debug('StopSong(): Track length: %s, total ticks: %s',
+                            trk_len, self.ttl_ticks)
+            self.mfile.write_little_endian(unpack(self.flip_lng(trk_len), 0x13))
         # TODO: raise SONG_FINISH
 
-    def write_var_len(self, ch: int, value: int) -> None:
-        buffer = ch & 0x7F
-        while value // 128 > 0:
-            value //= 128
-            buffer |= 0x80
-            buffer = (buffer * 256) | (value & 0x7F)
-        file = File.get_file_from_id(ch)
-        while True:
-            file.write_byte(buffer & 255)
-            if not buffer & 0x80:
-                break
-            buffer //= 256
 
 
 def main():

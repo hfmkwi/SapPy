@@ -1,5 +1,5 @@
-# -*- coding: utf-8 -*-
-# !/usr/bin/env python3
+#!/usr/bin/env python3
+#-*- coding: utf-8 -*-
 # pylint: disable=C0326,R0903
 """Player types"""
 from struct import unpack
@@ -10,12 +10,12 @@ from fileio import File
 __all__ = ('DirectHeader', 'DrumKitHeader', 'InstrumentHeader', 'InvalidHeader',
            'MasterTableEntry', 'MasterTableEntry', 'MultiHeader', 'NoiseHeader',
            'NoiseHeader', 'SampleHeader', 'SongHeader', 'SquareOneHeader',
-           'SquareTwoHeader', 'WaveHeader', 'note_to_name', 'note_to_frequency',
-           'read_direct_head', 'read_drumkit_head', 'read_instrument_head',
-           'read_invalid_head', 'read_noise_head', 'read_multi_head',
-           'read_sample_head', 'read_song_head', 'read_square1_head',
-           'read_square2_head', 'read_wave_head', 'signed_byte_to_integer',
-           'slen_to_ticks')
+           'SquareTwoHeader', 'WaveHeader', 'note_to_name', 'note_to_freq',
+           'rd_dct_head', 'rd_drmkit_head', 'rd_inst_head',
+           'rd_inv_head', 'rd_nse_head', 'rd_mul_head',
+           'rd_smp_head', 'rd_sng_head', 'rd_sq1_head',
+           'rd_sq2_head', 'rd_wav_head', 'sbyte_to_int',
+           'stlen_to_ticks')
 
 # yapf: disable
 NOTES = {
@@ -33,7 +33,7 @@ NOTES = {
     11: 'B'
 }
 # yapf: enable
-SHORT_LEN = {
+STLEN = {
     0x00: 0x00,
     0x01: 0x01,
     0x02: 0x02,
@@ -89,26 +89,26 @@ SHORT_LEN = {
 class DirectHeader(NamedTuple):
     """Data for a DirectSound instrument."""
     # yapf: disable
-    b0:            int = int()
-    b1:            int = int()
-    sample_header: int = int()
-    attack:        int = int()
-    hold:          int = int()
-    sustain:       int = int()
-    release:       int = int()
+    b0:       int = int()
+    b1:       int = int()
+    smp_head: int = int()
+    attack:   int = int()
+    hold:     int = int()
+    sustain:  int = int()
+    release:  int = int()
     # yapf: enable
 
 
 class DrumKitHeader(NamedTuple):
     """Data for a Drumkit instrument."""
     # yapf: disable
-    b0:           int = int()
-    b1:           int = int()
-    direct_table: int = int()
-    b6:           int = int()
-    b7:           int = int()
-    b8:           int = int()
-    b9:           int = int()
+    b0:      int = int()
+    b1:      int = int()
+    dct_tbl: int = int()
+    b6:      int = int()
+    b7:      int = int()
+    b8:      int = int()
+    b9:      int = int()
     # yapf: enable
 
 
@@ -137,19 +137,19 @@ class InvalidHeader(NamedTuple):
 class MasterTableEntry(NamedTuple):
     """Song entry as read from ROM."""
     # yapf: disable
-    song:      int = int()
-    priority1: int = int()
-    priority2: int = int()
+    song: int = int()
+    pri1: int = int()
+    pri2: int = int()
     # yapf: enable
 
 
 class MultiHeader(NamedTuple):
     """Data for MultiSample instrument."""
     # yapf: disable
-    b0:           int = int()
-    b1:           int = int()
-    direct_table: int = int()
-    key_map:      int = int()
+    b0:      int = int()
+    b1:      int = int()
+    dct_tbl: int = int()
+    kmap: int = int()
     # yapf: enable
 
 
@@ -175,7 +175,7 @@ class SampleHeader(NamedTuple):
     flags:     int = int()
     b4:        int = int()
     fine_tune: int = int()
-    frequency: int = int()
+    freq:      int = int()
     loop:      int = int()
     size:      int = int()
     # yapf: enable
@@ -184,11 +184,11 @@ class SampleHeader(NamedTuple):
 class SongHeader(NamedTuple):
     """Data for an AGB song."""
     # yapf: disable
-    tracks:          int = int()
-    blocks:          int = int()
-    priority:        int = int()
-    reverb:          int = int()
-    instrument_bank: int = int()
+    tracks:    int = int()
+    blks:      int = int()
+    pri:       int = int()
+    reverb:    int = int()
+    inst_bank: int = int()
     # yapf: enable
 
 
@@ -244,224 +244,224 @@ def note_to_name(midi_note: bytes) -> str:
     return NOTES.get(note) + octave
 
 
-def note_to_frequency(midi_note: int, mid_c_freq: int = -1) -> int:
+def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
     """Retrieve the sound frequency of a MIDI note relative to C3."""
     magic = 2 ** (1/12)
     delta_x = midi_note - 0x3C
-    if mid_c_freq == -1:
+    if midc_freq == -1:
         a_freq = 7040
         c_freq = a_freq * magic**3
-    elif mid_c_freq == -2:
+    elif midc_freq == -2:
         a_freq = 7040 / 2
         c_freq = a_freq * magic**3
     else:
-        c_freq = mid_c_freq
+        c_freq = midc_freq
     return c_freq * magic**delta_x
 
 
-def read_direct_head(file_id: int, offset: int = None) -> DirectHeader:
+def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:
     """Read int from a specified file into a Direct header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = DirectHeader(
-        b0            = w_file.read_byte(),
-        b1            = w_file.read_byte(),
-        sample_header = w_file.read_little_endian(4),
-        attack        = w_file.read_byte(),
-        hold          = w_file.read_byte(),
-        sustain       = w_file.read_byte(),
-        release       = w_file.read_byte(),
+        b0       = w_file.rd_byte(),
+        b1       = w_file.rd_byte(),
+        smp_head = w_file.rd_ltendian(4),
+        attack   = w_file.rd_byte(),
+        hold     = w_file.rd_byte(),
+        sustain  = w_file.rd_byte(),
+        release  = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_drumkit_head(file_id: int, offset: int = None) -> DrumKitHeader:
+def rd_drmkit_head(file_id: int, addr: int = None) -> DrumKitHeader:
     """Read int from a specified file into a DrumKit header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = DrumKitHeader(
-        b0           = w_file.read_byte(),
-        b1           = w_file.read_byte(),
-        direct_table = w_file.read_little_endian(4),
-        b6           = w_file.read_byte(),
-        b7           = w_file.read_byte(),
-        b8           = w_file.read_byte(),
-        b9           = w_file.read_byte()
+        b0      = w_file.rd_byte(),
+        b1      = w_file.rd_byte(),
+        dct_tbl = w_file.rd_ltendian(4),
+        b6      = w_file.rd_byte(),
+        b7      = w_file.rd_byte(),
+        b8      = w_file.rd_byte(),
+        b9      = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_instrument_head(file_id: int, offset: int = None) -> InstrumentHeader:
+def rd_inst_head(file_id: int, addr: int = None) -> InstrumentHeader:
     """Read int from a specified file into a Instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = InstrumentHeader(
-        channel    = w_file.read_byte(),
-        drum_pitch = w_file.read_byte()
+        channel    = w_file.rd_byte(),
+        drum_pitch = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_invalid_head(file_id: int, offset: int = None) -> InvalidHeader:
+def rd_inv_head(file_id: int, addr: int = None) -> InvalidHeader:
     """Read int from a specified file into a Invalid header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = InvalidHeader(
-        b0 = w_file.read_byte(),
-        b1 = w_file.read_byte(),
-        b2 = w_file.read_byte(),
-        b3 = w_file.read_byte(),
-        b4 = w_file.read_byte(),
-        b5 = w_file.read_byte(),
-        b6 = w_file.read_byte(),
-        b7 = w_file.read_byte(),
-        b8 = w_file.read_byte(),
-        b9 = w_file.read_byte()
+        b0 = w_file.rd_byte(),
+        b1 = w_file.rd_byte(),
+        b2 = w_file.rd_byte(),
+        b3 = w_file.rd_byte(),
+        b4 = w_file.rd_byte(),
+        b5 = w_file.rd_byte(),
+        b6 = w_file.rd_byte(),
+        b7 = w_file.rd_byte(),
+        b8 = w_file.rd_byte(),
+        b9 = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_noise_head(file_id: int, offset: int = None) -> NoiseHeader:
+def rd_nse_head(file_id: int, addr: int = None) -> NoiseHeader:
     """Read int from a specified file into a Noise instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = NoiseHeader(
-        b0      = w_file.read_byte(),
-        b1      = w_file.read_byte(),
-        b2      = w_file.read_byte(),
-        b3      = w_file.read_byte(),
-        b4      = w_file.read_byte(),
-        b5      = w_file.read_byte(),
-        attack  = w_file.read_byte(),
-        decay   = w_file.read_byte(),
-        sustain = w_file.read_byte(),
-        release = w_file.read_byte()
+        b0      = w_file.rd_byte(),
+        b1      = w_file.rd_byte(),
+        b2      = w_file.rd_byte(),
+        b3      = w_file.rd_byte(),
+        b4      = w_file.rd_byte(),
+        b5      = w_file.rd_byte(),
+        attack  = w_file.rd_byte(),
+        decay   = w_file.rd_byte(),
+        sustain = w_file.rd_byte(),
+        release = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_multi_head(file_id: int, offset: int = None) -> MultiHeader:
+def rd_mul_head(file_id: int, addr: int = None) -> MultiHeader:
     """Read int from a specified file into a Multi-sample instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = MultiHeader(
-        b0           = w_file.read_byte(),
-        b1           = w_file.read_byte(),
-        direct_table = w_file.read_little_endian(4),
-        key_map      = w_file.read_little_endian(4)
+        b0      = w_file.rd_byte(),
+        b1      = w_file.rd_byte(),
+        dct_tbl = w_file.rd_ltendian(4),
+        kmap = w_file.rd_ltendian(4)
     )
     # yapf: enable
     return header
 
 
-def read_sample_head(file_id: int, offset: int = None) -> SampleHeader:
+def rd_smp_head(file_id: int, addr: int = None) -> SampleHeader:
     """Read int from a specified file into a Sample header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = SampleHeader(
-        tracks          = w_file.read_little_endian(4),
-        blocks          = w_file.read_byte(),
-        priority        = w_file.read_byte(),
-        reverb          = w_file.read_little_endian(4),
-        instrument_bank = w_file.read_little_endian(4)
+        tracks    = w_file.rd_ltendian(4),
+        blks      = w_file.rd_byte(),
+        pri       = w_file.rd_byte(),
+        reverb    = w_file.rd_ltendian(4),
+        inst_bank = w_file.rd_ltendian(4)
     )
     # yapf: enable
     return header
 
 
-def read_song_head(file_id: int, offset: int = None) -> SongHeader:
+def rd_sng_head(file_id: int, addr: int = None) -> SongHeader:
     """Read int from a specified file into a Song header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = SongHeader(
-        tracks          = w_file.read_byte(),
-        blocks          = w_file.read_byte(),
-        priority        = w_file.read_byte(),
-        reverb          = w_file.read_byte(),
-        instrument_bank = w_file.read_little_endian(4)
+        tracks    = w_file.rd_byte(),
+        blks      = w_file.rd_byte(),
+        pri       = w_file.rd_byte(),
+        reverb    = w_file.rd_byte(),
+        inst_bank = w_file.rd_ltendian(4)
     )
     # yapf: enable
     return header
 
 
-def read_square1_head(file_id: int, offset: int = None) -> SquareOneHeader:
+def rd_sq1_head(file_id: int, addr: int = None) -> SquareOneHeader:
     """Read int from a specified file into a Square1 instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = SquareOneHeader(
-        raw1       = w_file.read_byte(),
-        raw2       = w_file.read_byte(),
-        duty_cycle = w_file.read_byte(),
-        b3         = w_file.read_byte(),
-        b4         = w_file.read_byte(),
-        b5         = w_file.read_byte(),
-        attack     = w_file.read_byte(),
-        decay      = w_file.read_byte(),
-        sustain    = w_file.read_byte(),
-        release    = w_file.read_byte()
+        raw1       = w_file.rd_byte(),
+        raw2       = w_file.rd_byte(),
+        duty_cycle = w_file.rd_byte(),
+        b3         = w_file.rd_byte(),
+        b4         = w_file.rd_byte(),
+        b5         = w_file.rd_byte(),
+        attack     = w_file.rd_byte(),
+        decay      = w_file.rd_byte(),
+        sustain    = w_file.rd_byte(),
+        release    = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_square2_head(file_id: int, offset: int = None) -> SquareTwoHeader:
+def rd_sq2_head(file_id: int, addr: int = None) -> SquareTwoHeader:
     """Read bytes from a specified file into a Square2 instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = SquareTwoHeader(
-        b0         = w_file.read_byte(),
-        b1         = w_file.read_byte(),
-        duty_cycle = w_file.read_byte(),
-        b3         = w_file.read_byte(),
-        b4         = w_file.read_byte(),
-        b5         = w_file.read_byte(),
-        attack     = w_file.read_byte(),
-        decay      = w_file.read_byte(),
-        sustain    = w_file.read_byte(),
-        release    = w_file.read_byte()
+        b0         = w_file.rd_byte(),
+        b1         = w_file.rd_byte(),
+        duty_cycle = w_file.rd_byte(),
+        b3         = w_file.rd_byte(),
+        b4         = w_file.rd_byte(),
+        b5         = w_file.rd_byte(),
+        attack     = w_file.rd_byte(),
+        decay      = w_file.rd_byte(),
+        sustain    = w_file.rd_byte(),
+        release    = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def read_wave_head(file_id: int, offset: int = None) -> WaveHeader:
+def rd_wav_head(file_id: int, addr: int = None) -> WaveHeader:
     """Read bytes from a specified file into a Wave instrument header."""
-    w_file = File.get_file_from_id(file_id)
-    w_file.read_offset = offset
+    w_file = File.from_id(file_id)
+    w_file.rd_addr = addr
     # yapf: disable
     header = WaveHeader(
-        b0      = w_file.read_byte(),
-        b1      = w_file.read_byte(),
-        sample  = w_file.read_little_endian(4),
-        attack  = w_file.read_byte(),
-        decay   = w_file.read_byte(),
-        sustain = w_file.read_byte(),
-        release = w_file.read_byte()
+        b0      = w_file.rd_byte(),
+        b1      = w_file.rd_byte(),
+        sample  = w_file.rd_ltendian(4),
+        attack  = w_file.rd_byte(),
+        decay   = w_file.rd_byte(),
+        sustain = w_file.rd_byte(),
+        release = w_file.rd_byte()
     )
     # yapf: enable
     return header
 
 
-def signed_byte_to_integer(signed_byte: int) -> int:
+def sbyte_to_int(sbyte: int) -> int:
     """Convert a signed 4-byte bytearray into a signed integer."""
-    return unpack('i', signed_byte)
+    return unpack('i', sbyte)
 
 
-def slen_to_ticks(short_len: int) -> int:
+def stlen_to_ticks(short_len: int) -> int:
     """Convert short length to MIDI ticks."""
-    return SHORT_LEN.get(short_len)
+    return STLEN.get(short_len)

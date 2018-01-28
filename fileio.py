@@ -1,14 +1,9 @@
-# -*- coding: utf-8 -*-
-# !/usr/bin/env/python -3
-# pylint: disable=C0123,W0212
-"""Provides File IO for Sappy
-
-Todos:
-    TODO(Me) Update all function docstrings
-"""
-import os
-import os.path
+#!/usr/bin/python3
+#-*- coding: utf-8 -*-
+# pylint: disable=C0103,C0123,W0212,W0622
+"""Provides File IO for Sappy"""
 import struct
+from os.path import (exists, getsize, isabs, isfile)
 
 __all__ = ('Error', 'File', 'open_file', 'open_new_file')
 
@@ -16,53 +11,53 @@ __all__ = ('Error', 'File', 'open_file', 'open_new_file')
 class Error(Exception):
     """Module-level base exception"""
 
-    def __init__(self, message: str, code: int) -> None:
+    def __init__(self, msg: str, code: int) -> None:
         """Initate an exception with a message and err code"""
         super().__init__()
-        self.message = message
+        self.msg = msg
         self.code = code
 
 
 class File(object):  # pylint: disable=R0902
     """Base file object """
 
-    _file_table = {}
+    _ftable = {}
 
-    def __init__(self, file_path: str = None, file_id: int = None) -> None:
+    def __init__(self, path: str = None, id: int = None) -> None:
         """Initate a file object with basic IO functions
 
         Args:
-            file_path: refers to an existing file; otherwise refers to a new
+            path: refers to an existing file; otherwise refers to a new
                 file
-            file_id: ID number of the file for internal identification
+            id: ID number of the file for internal identification
 
         Attributes:
-            _file_table (dict): A table holding references to all open files
+            _ftable (dict): A table holding references to all open files
                 stored under their respective IDs.
-            file_id (int): file number for developer identification.
-            file_obj (IOWrapper): root file object used for read/write
+            id (int): file number for developer identification.
+            file (IOWrapper): root file object used for read/write
                 operations.
-            file_path (str): file path of the file intended for access.
-            read_offset (int): offset of the read head
-            write_offset (int): offset of the write head
+            path (str): file path of the file intended for access.
+            rd_addr (int): offset of the read head
+            wr_addr (int): offset of the write head
 
         """
-        self._file_path = file_path  # Set file name for local access
+        self._path = path  # Set file name for local access
 
         # Define file ID
-        if not self._check_id(file_id):
-            self._file_id = self._get_free_file_id()
+        if not self._chk_id(id):
+            self._id = self._get_free_id()
         else:
-            self._file_id = file_id
-            self._file_table[file_id] = self
+            self._id = id
+            self._ftable[id] = self
 
         # Create an IO object for file access
-        if self._file_path and self._check_file_exists(self.file_path):
-            self._file_obj = open(self.file_path, 'rb+')
+        if self._path and self._chk_path():
+            self._file = open(self.path, 'rb+')
         else:
-            self._file_obj = None
+            self._file = None
 
-        self._write_offset = self._read_offset = 0
+        self._wr_addr = self._rd_addr = 0
 
     def __enter__(self):
         return self
@@ -71,65 +66,48 @@ class File(object):  # pylint: disable=R0902
         self.close()
 
     @property
-    def file_path(self) -> str:
+    def path(self) -> str:
         """File path to the file"""
-        return self._file_path
+        return self._path
 
     @property
-    def file_id(self) -> int:
+    def id(self) -> int:
         """File ID number for internal identification"""
-        return self._file_id
+        return self._id
 
     @property
-    def read_offset(self) -> int:
+    def rd_addr(self) -> int:
         """Current offset of the read head"""
-        return self._read_offset
+        return self._rd_addr
 
-    @read_offset.setter
-    def read_offset(self, offset: int = None) -> None:
-        if offset is None:
-            offset = self._read_offset
-        elif offset < 0:
-            offset = 0
-        self._read_offset = offset
+    @rd_addr.setter
+    def rd_addr(self, addr: int = None) -> None:
+        if addr is None:
+            addr = self._rd_addr
+        elif addr < 0:
+            addr = 0
+        self._rd_addr = addr
 
     @property
     def size(self):
         """Number of int in file"""
-        return os.path.getsize(self.file_path) + 1
+        return getsize(self.path) + 1
 
     @property
-    def write_offset(self) -> int:
+    def wr_addr(self) -> int:
         """Current offset of the write head"""
-        return self._write_offset
+        return self._wr_addr
 
-    @write_offset.setter
-    def write_offset(self, offset: int = None) -> None:
-        if offset is None:
-            offset = self._write_offset
-        elif offset < 0:
-            offset = 0
-        self._write_offset = offset
-
-    @staticmethod
-    def _check_file_exists(file_path: str) -> bool:
-        """Check if a file path refers to an existing file and not a directory
-
-        Args:
-            path: file path to check
-
-        Returns:
-            True if successful, False otherwise.
-
-        """
-        cur_file = os.path.curdir + file_path
-        return (os.path.isabs(file_path) and os.path.exists(file_path) and
-                os.path.isfile(file_path)) or (os.path.isabs(cur_file) and
-                                               os.path.exists(cur_file) and
-                                               os.path.isfile(cur_file))
+    @wr_addr.setter
+    def wr_addr(self, addr: int = None) -> None:
+        if addr is None:
+            addr = self._wr_addr
+        elif addr < 0:
+            addr = 0
+        self._wr_addr = addr
 
     @staticmethod
-    def gba_rom_pointer_to_offset(pointer: int) -> int:
+    def gba_ptr_to_addr(ptr: int) -> int:
         """Convert an AGB rom pointer to an integer
 
         An AGB rom pointer is a 4 byte stream in little-endian format in the
@@ -144,16 +122,16 @@ class File(object):  # pylint: disable=R0902
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
-        if pointer < 0x8000000 or pointer > 0x9FFFFFF:
+        if ptr < 0x8000000 or ptr > 0x9FFFFFF:
             return -1
-        return pointer - 0x8000000
+        return ptr - 0x8000000
 
     @staticmethod
-    def get_file_from_id(file_id: int) -> 'File':
+    def from_id(id: int) -> 'File':
         """Retrieve a file object from it's internal ID."""
-        return __class__._file_table.get(file_id)
+        return __class__._ftable.get(id)
 
-    def _check_id(self, file_id: int) -> bool:
+    def _chk_id(self, id: int) -> bool:
         """Check if the specified file ID is valid and unused
 
         Args:
@@ -166,9 +144,17 @@ class File(object):  # pylint: disable=R0902
             Error: 'invalid file number'
 
         """
-        if file_id is not None and not 0 <= file_id < 256:
-            raise Error('invalid file number', 2)
-        return file_id not in self._file_table and type(file_id) == int
+        return id not in self._ftable and type(id) == int
+
+    def _chk_path(self) -> bool:
+        """Check if a file path refers to an existing file and not a directory
+
+        Returns:
+            True if successful, False otherwise.
+
+        """
+        path = self._path
+        return exists(path) and isfile(path) and isabs(path)
 
     def _close(self) -> None:
         """Close a file by ID
@@ -178,11 +164,11 @@ class File(object):  # pylint: disable=R0902
             file_id: file ID number
 
         """
-        self._file_obj.close()
-        self._file_table.pop(self._file_id)
+        self._file.close()
+        self._ftable.pop(self._id)
         del self
 
-    def _get(self, offset: int = None) -> int:
+    def _get(self, addr: int = None) -> int:
         """Imitation of the VB6 `Get` keyword in binary mode
 
         Args:
@@ -193,15 +179,15 @@ class File(object):  # pylint: disable=R0902
             A int-like object representing one single byte
 
         """
-        if offset is None:
-            offset = self.read_offset
-        self.read_offset = offset
-        self._file_obj.seek(offset)
-        byte = struct.unpack('B', self._file_obj.read(1))[0]
-        self.read_offset = self._file_obj.tell()
+        if addr is None:
+            addr = self.rd_addr
+        self.rd_addr = addr
+        self._file.seek(addr)
+        byte = struct.unpack('B', self._file.read(1))[0]
+        self.rd_addr = self._file.tell()
         return byte
 
-    def _get_free_file_id(self) -> int:
+    def _get_free_id(self) -> int:
         """Return a free file id (internal use only)
 
         Returns:
@@ -212,200 +198,187 @@ class File(object):  # pylint: disable=R0902
 
         """
         for file_id in range(256):
-            if file_id not in self._file_table:
-                self._file_table[file_id] = 1
+            if file_id not in self._ftable:
+                self._ftable[file_id] = 1
                 return file_id
-        raise Error(message='all files are currently in use', code=1)
+        raise Error(msg='all files are currently in use', code=1)
 
-    def _put(self, data: int, offset: int = None) -> None:
+    def _put(self, data: int, addr: int = None) -> None:
         """Imitation of the VB6 `Put` keyword in binary mode
 
         Args:
             data: data to be written to file
-            offset: the offset in the file at which to relocate the write head
+            addr: the offset in the file at which to relocate the write head
                 and write to
                 if None, defaults to the write head's current position
 
         """
-        if offset is None:
-            offset = self.write_offset
-        self.write_offset = offset
-        self._file_obj.seek(offset)
+        self.wr_addr = addr
+        self._file.seek(addr)
         data = struct.pack('B', data)
-        self._file_obj.write(data)
-        self.write_offset = self._file_obj.tell()
-        assert self.write_offset > offset or offset is not None
+        self._file.write(data)
+        self.wr_addr = self._file.tell()
+        assert self.wr_addr > addr or addr is not None
 
-    def close(self, file_id: int = None) -> None:
+    def close(self, id: int = None) -> None:  # pylint: disable=W0622
         """Close the current file
 
         Args:
-            file_id: a valid file ID
+            id: a valid file ID
 
         """
-        if not self._check_id(file_id):
-            file_id = self.file_id
-        if self.file_id != file_id:
-            file = self._file_table.get(file_id)
+        if not self._chk_id(id):
+            id = self.id
+        if self.id != id:
+            file = self._ftable.get(id)
             file.close(file.file_id)
         else:
             self._close()
 
-    def write_byte(self, data: int, offset: int = None) -> None:
-        """Write a single byte to file
+    w_byte = _put
 
-        Args:
-            data: data to write to file
-            offset: position to move the write head to.
-                if None, defaults to the write head's current position.
-
-        """
-        self.write_offset = offset
-        self._put(data, offset)
-
-    def write_big_endian(self, width: int, data: int,
-                         offset: int = None) -> None:
+    def wr_bgendian(self, width: int, data: int, addr: int = None) -> None:
         """Write an integer as int in big-endian format to file
 
         Args:
             width: maximum size of data in int form
             data: data to write to file
-            offset: position to move the write head to
+            addr: address to move the write head to
                 if None, defaults to the write head's current position.
 
         """
-        self.write_offset = offset
+        self.wr_addr = addr
         for i in range(width):
             byte = data // 16**(i * 2) % 256
-            self.write_byte(byte)
+            self.w_byte(byte)
 
-    def write_little_endian(self, width: int, data: int,
-                            offset: int = None) -> None:
+    def wr_ltendian(self, width: int, data: int, addr: int = None) -> None:
         """Write an integer as int in little-endian format to file
 
         Args:
             width: maximum byte width of the data
             data: data to write to file
-            offset: position to move the write head to
+            addr: address to move the write head to
                 if None, defaults to the write head's current position.
 
         """
-        self.write_offset = offset
+        self.wr_addr = addr
         for i in range(width - 1, -1, -1):
             byte = data // 16**(i * 2) % 256
-            self.write_byte(byte)
+            self.w_byte(byte)
 
-    def write_string(self, data: str, offset: int = None) -> None:
+    def wr_str(self, data: str, addr: int = None) -> None:
         """Write a string as int to file
 
         Args:
             data: data to write to file
-            offset: position to move the write head to
+            addr: address to move the write head to
                 if None, defaults to the write head's current position
         """
-        self.write_offset = offset
+        self.wr_addr = addr
+        data = map(ord, data)
         for char in data:
-            self.write_byte(int([ord(char)]))
+            self.w_byte(char)
 
-    def read_byte(self, offset: int = None) -> int:
+    def rd_byte(self, addr: int = None) -> int:
         """Read a byte from file
 
         Args:
-            offset: a valid address in the file at which to move the read head
+            addr: a valid address in the file at which to move the read head
                 if None, defaults to the read head's current position
 
         Returns:
-            a int-like object length 1
+            an integer [0-255]
 
         """
-        self.read_offset = offset
-        return self._get(offset)
+        return self._get(addr)
 
-    def read_vlq(self, offset: int = None) -> int:
+    def rd_vlq(self, addr: int = None) -> int:
         """Read a stream of int in VLQ format
 
         Args:
-            offset: a valid address in the file at which to move the read head
+            addr: a valid address in the file at which to move the read head
                 if None, defaults to the read head's current position
 
         Returns:
             an integer
         """
-        self.read_offset = offset
+        self.rd_addr = addr
         vlq = 0
         ret_len = 0
         while True:
-            byte = self.read_byte()
+            byte = self.rd_byte()
             vlq = vlq * 2**7 + (byte % 0x80)
             ret_len += 1
             if ret_len == 4 or byte < 0x80:
                 break
         return vlq
 
-    def read_big_endian(self, width: int, offset: int = None) -> int:
+    def rd_bgendian(self, width: int, addr: int = None) -> int:
         """Read a stream of int in big-endian format
 
         Args:
             width: number of consecutive int to read
-            offset: a valid address in the file at which to move the read head.
+            addr: a valid address in the file at which to move the read head.
                 if None, defaults to the read head's current position.
 
         Returns:
             An integer
         """
-        self.read_offset = offset
+        self.rd_addr = addr
         out = 0
         for i in range(width - 1, -1, -1):
-            out += self.read_byte() * 256**i
+            out += self.rd_byte() * 256**i
         return out
 
-    def read_little_endian(self, width: int, offset: int = None) -> int:
+    def rd_ltendian(self, width: int, addr: int = None) -> int:
         """Read a stream of int in little-endian format
 
         Args:
             width: number of consective int to read
-            offset: a valid address in the file at which to move the read head.
+            addr: a valid address in the file at which to move the read head.
                 if None, defaults to the read head's current positoin.
 
         Returns:
             An integer
         """
-        self.read_offset = offset
+        self.rd_addr = addr
         out = 0
         for i in range(width):
-            out += self.read_byte() * 256**i
+            out += self.rd_byte() * 256**i
         return out
 
-    def read_string(self, length: int, offset: int = None) -> str:
+    def rd_str(self, len: int, addr: int = None) -> str:
         """Read a stream of int as a string from file
 
         Args:
-            length: number of consecutive int to read
-            offset: a valid address in the file at which to move the read head.
+            len: number of consecutive int to read
+            addr: a valid address in the file at which to move the read head.
                 if None, defaults to the read ehad's current position.
 
         Returns:
             A string of the specified length
         """
-        self.read_offset = offset
+        self.rd_addr = addr
         out = []
-        for i in range(length):  # pylint: disable=unused-variable
-            out.append(chr(self.read_byte()))
+        for __ in range(len):
+            out.append(self.rd_byte())
+        out = map(chr, out)
         return ''.join(out)
 
-    def read_gba_rom_pointer(self, offset: int = -1) -> int:
+    def rd_gba_ptr(self, addr: int = -1) -> int:
         """Read a stream of int as an AGB rom pointer.
 
         Args:
-            offset: a valid address in the file at which to move the read head.
+            addr: a valid address in the file at which to move the read head.
                 If None, defaults to the read head's current position.
 
         Returns:
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
-        pointer = self.read_little_endian(4, offset)
-        return self.gba_rom_pointer_to_offset(pointer)
+        ptr = self.rd_ltendian(4, addr)
+        return self.gba_ptr_to_addr(ptr)
 
 
 def open_file(file_path: str, file_id: int = None) -> File:
