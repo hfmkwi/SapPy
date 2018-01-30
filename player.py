@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0326,R0903
+# pylint: disable=C0326,E1120,R0903
 """Player types"""
 from struct import unpack
 from typing import NamedTuple

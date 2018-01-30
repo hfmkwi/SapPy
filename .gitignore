@@ -104,9 +104,9 @@ ENV/
 test.py
 
 # IntelliJ IDE config
-.idea/*
+.idea/
 
 # ctags
 tags
 
-null
+.vscode

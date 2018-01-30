@@ -1,6 +1,6 @@
 #!/usr/bin/python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0103, C0326, R0902, R0903, R0913, W0511
+# pylint: disable=C0103, C0326, E1120, R0902, R0903, R0913, W0511
 """Main file."""
 from enum import Enum
 from logging import INFO, basicConfig, getLogger
@@ -41,46 +41,46 @@ class Decoder(object):
     log = getLogger(name=__name__)
 
     def __init__(self):
-        self.playing:     bool                        = bool()
-        self.record:      bool                        = bool()
-        self.ist_tbl_ptr: int                         = int()
-        self.layer:       int                         = int()
-        self.sng_lst_ptr: int                         = int()
-        self.sng_num:     int                         = int()
-        self.sng_ptr:     int                         = int()
-        self.ttl_ticks:   int                         = int()
-        self.ttl_msecs:   int                         = int()
-        self._gbl_vol:    int                         = 100
-        self.prv_tick:    float                       = float()
-        self.tick_ctr:    float                       = float()
-        self.rip_ears:    list                        = list()
-        self.mdrum_map:   list                        = list()
-        self.mpatch_map:  list                        = list()
-        self.mpatch_tbl:  list                        = list()
-        self.fpath:       str                         = str()
-        self.mfile:       File                        = None
-        self.wfile:       File                        = None
-        self.channels:    ChannelQueue[Channel]       = ChannelQueue()
-        self.dct_head:    DirectHeader                = DirectHeader()
-        self.directs:     DirectQueue[Direct]         = DirectQueue()
-        self.drm_head:    DrumKitHeader               = DrumKitHeader()
-        self.drmkits:     DrumKitQueue[DrumKit]       = DrumKitQueue()
-        self.ins_head:    InstrumentHeader            = InstrumentHeader()
-        self.insts:       InstrumentQueue[Instrument] = InstrumentQueue()
-        self.note_arr:    List[Note]                  = [Note()] * 32
-        self.mul_head:    MultiHeader                 = MultiHeader()
-        self.gb_head:     NoiseHeader                 = NoiseHeader()
-        self.note_q:      NoteQueue[Note]             = NoteQueue()
-        self.last_evt:    RawMidiEvent                = RawMidiEvent()
-        self.smp_head:    SampleHeader                = SampleHeader()
-        self.smp_pool:    SampleQueue[Sample]         = SampleQueue()
+        self.playing:      bool                        = bool()
+        self.record:       bool                        = bool()
+        self.inst_tbl_ptr: int                         = int()
+        self.layer:        int                         = int()
+        self.sng_lst_ptr:  int                         = int()
+        self.sng_num:      int                         = int()
+        self.sng_ptr:      int                         = int()
+        self.ttl_ticks:    int                         = int()
+        self.ttl_msecs:    int                         = int()
+        self._gbl_vol:     int                         = 100
+        self.prv_tick:     float                       = float()
+        self.tick_ctr:     float                       = float()
+        self.rip_ears:     list                        = list()
+        self.mdrum_map:    list                        = list()
+        self.mpatch_map:   list                        = list()
+        self.mpatch_tbl:   list                        = list()
+        self.fpath:        str                         = str()
+        self.mfile:        File                        = None
+        self.wfile:        File                        = None
+        self.channels:     ChannelQueue[Channel]       = ChannelQueue()  # pylint:    disable = E1136
+        self.dct_head:     DirectHeader                = DirectHeader()
+        self.directs:      DirectQueue[Direct]         = DirectQueue()  # pylint:     disable = E1136
+        self.drm_head:     DrumKitHeader               = DrumKitHeader()
+        self.drmkits:      DrumKitQueue[DrumKit]       = DrumKitQueue()  # pylint:    disable = E1136
+        self.inst_head:    InstrumentHeader            = InstrumentHeader()
+        self.insts:        InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
+        self.note_arr:     List[Note]                  = [Note()] * 32
+        self.mul_head:     MultiHeader                 = MultiHeader()
+        self.gb_head:      NoiseHeader                 = NoiseHeader()
+        self.note_q:       NoteQueue[Note]             = NoteQueue()  # pylint:       disable = E1136
+        self.last_evt:     RawMidiEvent                = RawMidiEvent()
+        self.smp_head:     SampleHeader                = SampleHeader()
+        self.smp_pool:     SampleQueue[Sample]         = SampleQueue()  # pylint:     disable = E1136
 
     @property
-    def global_volume(self) -> int:
+    def gbl_vol(self) -> int:
         return self._gbl_vol
 
-    @global_volume.setter
-    def global_volume(self, vol: int) -> None:
+    @gbl_vol.setter
+    def gbl_vol(self, vol: int) -> None:
         self._gbl_vol = vol
 
     @staticmethod
@@ -99,23 +99,25 @@ class Decoder(object):
     def set_direct(queue: Collection, dct_key: str, inst_head: InstrumentHeader,
                    dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
         # yapf: disable
-        queue.directs[dct_key] = queue.directs[dct_key].replace(
-            drum_key   = inst_head.drum_pitch,
-            t_output     = DirectTypes(inst_head.channel & 7),
-            env_attn = dct_head.attack,
-            env_decay       = dct_head.hold,
-            env_sustain     = dct_head.sustain,
-            env_release     = dct_head.release,
-            raw0            = dct_head.b0,
-            raw1            = dct_head.b1,
-            gb1             = gb_head.b2,
-            gb2             = gb_head.b3,
-            gb3             = gb_head.b4,
-            gb4             = gb_head.b5,
-            fixed_pitch     = (inst_head.channel & 0x08) == 0x08,
-            reverse         = (inst_head.channel & 0x10) == 0x10,
-            sample_id       = queue.directs[dct_key].sample_id,
-            key             = queue.directs[dct_key].key
+
+        direct = queue.directs[dct_key]
+        direct = Direct(
+            drum_key  = inst_head.drum_pitch,
+            out_type  = DirectTypes(inst_head.channel & 7),
+            env_attn  = dct_head.attack,
+            env_dcy   = dct_head.hold,
+            env_sus   = dct_head.sustain,
+            env_rel   = dct_head.release,
+            raw0      = dct_head.b0,
+            raw1      = dct_head.b1,
+            gb1       = gb_head.b2,
+            gb2       = gb_head.b3,
+            gb3       = gb_head.b4,
+            gb4       = gb_head.b5,
+            fix_pitch = (inst_head.channel & 0x08) == 0x08,
+            reverse   = (inst_head.channel & 0x10) == 0x10,
+            smp_id    = direct.smp_id,
+            key       = direct.key
         )
         # yapf: enable
 
@@ -189,11 +191,11 @@ class Decoder(object):
                 smp_head: SampleHeader, use_readstr: bool) -> None:
         dct_q = q.directs
         dct_q[dct_key] = dct_q[dct_key]._replace(
-            sample_id=dct_head.smp_head)
-        s_id = dct_q[dct_key].sample_id
+            smp_id=dct_head.smp_head)
+        s_id = dct_q[dct_key].smp_id
         if not self.smp_exists(s_id):
             self.smp_pool.add(str(s_id))
-            if dct_q[dct_key].t_output == DirectTypes.DIRECT:
+            if dct_q[dct_key].out_type == DirectTypes.DIRECT:
                 self.smp_head = rd_smp_head(
                     File.gba_ptr_to_addr(s_id))
                 if use_readstr:
@@ -204,7 +206,7 @@ class Decoder(object):
                     size=smp_head.size,
                     freq=smp_head.freq,
                     loop_start=smp_head.loop,
-                    loop_enable=smp_head.flags > 0,
+                    loop=smp_head.flags > 0,
                     gb_wave=False,
                     smp_data=smp_data
                 )
@@ -226,7 +228,7 @@ class Decoder(object):
                     size=32,
                     freq=self.GB_WAV_BASE_FREQ,
                     loop_start=0,
-                    loop_enable=True,
+                    loop=True,
                     gb_wave=True,
                     smp_data=smp_data
                 )
@@ -259,7 +261,7 @@ class Decoder(object):
             # TODO: raise SONG_STOP
             pass
 
-        self.ins_head = InstrumentHeader
+        self.inst_head = InstrumentHeader
         self.drm_head = DrumKitHeader
         self.dct_head = DirectHeader
         self.smp_head = SampleHeader
@@ -280,7 +282,7 @@ class Decoder(object):
         self.sng_ptr = ptr
         self.layer = self.wfile.rd_ltendian(4)
         pbyte = self.wfile.rd_byte(ptr)
-        self.ist_tbl_ptr = self.wfile.rd_gba_ptr(ptr + 4)
+        self.inst_tbl_ptr = self.wfile.rd_gba_ptr(ptr + 4)
 
         # TODO: raise LOADING_0
 
@@ -399,31 +401,37 @@ class Decoder(object):
                             self.channels[i].evt_queue.add(
                                 cticks, ctl_byte, pn, e, f)
                         if not self.patch_exists(lp):
-                            ins_head = rd_inst_head(
-                                1, self.ist_tbl_ptr + lp * 12)
-                            if ins_head.channel & 0x80 == 0x80:
-                                drm_head = rd_drmkit_head(1)
-                                ins_head = rd_inst_head(
-                                    1,
-                                    self.wfile.gba_ptr_to_addr(
-                                        drm_head.dct_tbl + pn * 12))
-                                dct_head = rd_dct_head(1)
-                                gb_head = rd_nse_head(
-                                    1,
-                                    self.wfile.gba_ptr_to_addr(
-                                        drm_head.dct_tbl + pn * 12 + 2))
-                                self.drmkits.add(str(lp))
-                                self.drmkits[str(lp)].add(str(pn))
-                                self.set_direct(self.drmkits[str(lp)], str(pn),
-                                               self.ins_head, self.dct_head,
+                            inst_ptr = self.inst_tbl_ptr + lp * 12
+                            inst_head = rd_inst_head(1, inst_ptr)
+                            s_lp = str(lp)
+                            s_pn = str(pn)
+                            s_cdr = str(cdr)
+                            if inst_head.channel & 0x80 == 0x80:
+                                self.drm_head = rd_drmkit_head(1)
+                                drm_ptr = drm_head.dct_tbl + pn * 12
+                                inst_ptr = self.wfile.gba_ptr_to_addr(drm_ptr)
+                                self.inst_head = rd_inst_head(1, inst_ptr)
+                                self.dct_head = rd_dct_head(1)
+                                nse_ptr = self.wfile.gba_ptr_to_addr(drm_ptr + 2)
+                                self.gb_head = rd_nse_head(1, nse_ptr)
+                                self.drmkits.add(s_lp)
+                                self.drmkits[s_lp].add(s_pn)
+                                self.set_direct(self.drmkits[s_lp], s_pn,
+                                               self.inst_head, self.dct_head,
                                                self.gb_head)
-                                if self.insts[str(lp)].directs[str(
-                                        cdr)].t_output in (
-                                            DirectTypes.DIRECT,
-                                            DirectTypes.WAVE):
-                                    self.get_smp(self.drmkits[str(lp)],
-                                                    str(pn), self.dct_head,
+                                smp_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
+                                dct_out = self.insts[s_lp].directs[s_cdr].out_type
+                                if dct_out in smp_out:
+                                    self.get_smp(self.drmkits[s_lp],
+                                                    s_pn, self.dct_head,
                                                     self.smp_head, False)
+                            elif inst_head.channel & 0x40 == 0x40:
+                                mul_head = rd_mul_head(1)
+                                self.insts.add(s_lp)
+                                self.insts[s_lp].kmaps.add(0, s_pn)
+                                kmap_dct = self.insts[s_lp].kmaps[s_pn]
+                                self.insts[s_lp].kmaps[s_pn] = kmap_dct._replace()
+
 
     def smp_exists(self, smp_id: int) -> bool:
         return str(smp_id) in self.smp_pool

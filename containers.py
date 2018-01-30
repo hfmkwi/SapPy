@@ -1,6 +1,6 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0103,C0123,C0326,R0901,R0903,R0913,R0914,W0221,W0622
+# pylint: disable=C0103,C0123,C0326,E1120,R0901,R0903,R0913,R0914,W0221,W0622
 """Data-storage containers for internal use."""
 from collections import deque, UserDict
 from enum import Enum
@@ -12,9 +12,9 @@ from fileio import File
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
            'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
-           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
-           'Sample', 'Subroutine')
+           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel',
+           'Direct', 'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note',
+           'NoteID', 'Sample', 'Subroutine')
 
 
 class ChannelTypes(Enum):
@@ -107,6 +107,10 @@ class Collection(deque, UserDict):
     def __ne__(self, other) -> bool:
         return deque.__ne__(self, other) and self.data != other.data
 
+    def add(self, *args):
+        """Abstract add method; add some container to a container queue"""
+        raise NotImplementedError
+
     def clear(self):
         """Clear all of storage and the keystore."""
         deque.clear(self)
@@ -146,7 +150,7 @@ class Collection(deque, UserDict):
 class ChannelQueue(Collection):
     """LIFO container of sound channels."""
 
-    def add(self, key: str = None) -> None:
+    def add(self, key: str) -> None:
         channel = Channel(key=key)
         self.append(channel)
 
@@ -154,7 +158,7 @@ class ChannelQueue(Collection):
 class DirectQueue(Collection):
     """LIFO container of DirectSound notes."""
 
-    def add(self, key: str = None) -> None:
+    def add(self, key: str) -> None:
         direct = Direct(key=key)
         self.key_append(direct, key)
 
@@ -162,7 +166,7 @@ class DirectQueue(Collection):
 class DrumKitQueue(Collection):
     """LIFO container of DrumKit notes."""
 
-    def add(self, key: str = None) -> None:
+    def add(self, key: str) -> None:
         drumkit = DrumKit(key=key)
         self.key_append(drumkit, key)
 
@@ -171,15 +175,15 @@ class EventQueue(Collection):
     """LIFO container of internal events."""
 
     # yapf: disable
-    def add(self, ticks: int, command_byte: int, param1: int,
-            param2: int, param3: int, key: str = None) -> None:
+    def add(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int,
+            key: str) -> None:
         event = Event(
             key          = key,
             ticks        = ticks,
-            command_byte = command_byte,
-            param1       = param1,
-            param2       = param2,
-            param3       = param3
+            cmd_byte = cmd_byte,
+            arg1       = arg1,
+            arg2       = arg2,
+            arg3       = arg3
         )
         self.append(event)
     # yapf: enable
@@ -188,7 +192,7 @@ class EventQueue(Collection):
 class InstrumentQueue(Collection):
     """LIFO container of AGB instruments."""
 
-    def add(self, key: str = None) -> None:
+    def add(self, key: str) -> None:
         instrument = Instrument(key=key)
         super().key_append(instrument, key)
 
@@ -196,7 +200,7 @@ class InstrumentQueue(Collection):
 class KeyMapQueue(Collection):
     """LIFO container of MIDI key maps."""
 
-    def add(self, assign_dct: int, key: str = None) -> None:
+    def add(self, assign_dct: int, key: str) -> None:
         kmap = KeyMap(key=key, assign_dct=assign_dct)
         super().key_append(kmap, key)
 
@@ -206,29 +210,28 @@ class NoteQueue(Collection):
 
     # yapf: disable
     def add(self, enable: bool, fmod_channel: int, note_num: int,
-            freq: int, velocity: int, parent: int,
-            unk_val: int, t_output: NoteTypes,
-            env_attn: int, env_decay: int, env_sustain: int,
-            env_release: int, wait_ticks: int, patch_num: int,
-            key: str = None) -> None:
+            freq: int, velocity: int, parent: int, unk_val: int,
+            out_type: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
+            env_rel: int, wait_ticks: int, patch_num: int,
+            key: str) -> None:
         """Initialize and append a new note."""
         note = Note(
-            key             = key,
-            enable         = enable,
-            fmod_channel    = fmod_channel,
+            key          = key,
+            enable       = enable,
+            fmod_channel = fmod_channel,
             note_num     = note_num,
-            freq       = freq,
-            velocity        = velocity,
+            freq         = freq,
+            velocity     = velocity,
             patch_num    = patch_num,
-            parent  = parent,
-            sample_id       = env_release,
-            unk_val   = unk_val,
-            t_output     = t_output,
-            env_attn = env_attn,
-            env_decay       = env_decay,
-            env_sustain     = env_sustain,
-            env_release     = env_release,
-            wait_ticks=wait_ticks)
+            parent       = parent,
+            smp_id       = env_rel,
+            unk_val      = unk_val,
+            out_type     = out_type,
+            env_attn     = env_attn,
+            env_dcy      = env_dcy,
+            env_sus      = env_sus,
+            env_rel      = env_rel,
+            wait_ticks   = wait_ticks)
         super().key_append(note, key)
         # yapf: enable
 
@@ -236,7 +239,7 @@ class NoteQueue(Collection):
 class NoteIDQueue(Collection):
     """LIFO container holding internal note IDs."""
 
-    def add(self, note_id: int, key: str = None) -> None:
+    def add(self, note_id: int, key: str) -> None:
         note = NoteID(key=key, note_id=note_id)
         super().key_append(note, key)
 
@@ -244,7 +247,7 @@ class NoteIDQueue(Collection):
 class SampleQueue(Collection):
     """LIFO container holding instrument samples."""
 
-    def add(self, key: str = None) -> None:
+    def add(self, key: str) -> None:
         sample = Sample(key=key)
         super().key_append(sample, key)
 
@@ -252,9 +255,8 @@ class SampleQueue(Collection):
 class SubroutineQueue(Collection):
     """LIFO container holding AGB subs."""
 
-    def add(self, event_queue_pointer: int, key: str = None) -> None:
-        subroutine = Subroutine(
-            key=key, event_queue_pointer=event_queue_pointer)
+    def add(self, evt_q_ptr: int, key: str) -> None:
+        subroutine = Subroutine(key=key, evt_q_ptr=evt_q_ptr)
         super().key_append(subroutine, key)
 
 
@@ -282,7 +284,7 @@ class Channel(NamedTuple):
     vib_depth:    int             = int()
     vib_rate:     int             = int()
     key:          str             = str()
-    t_output:     ChannelTypes    = ChannelTypes.NULL
+    out_type:     ChannelTypes    = ChannelTypes.NULL
     evt_queue:    EventQueue      = EventQueue()
     notes:        NoteQueue       = NoteQueue()
     subs:         SubroutineQueue = SubroutineQueue()
@@ -292,22 +294,22 @@ class Channel(NamedTuple):
 class Direct(NamedTuple):
     """DirectSound instrument."""
     # yapf: disable
-    reverse:     bool        = bool()
-    fixed_pitch: bool        = bool()
-    env_attn:    int         = 0x00
-    env_decay:   int         = 0x00
-    env_sustain: int         = 0x00
-    env_release: int         = 0x00
-    raw0:        int         = 0x00
-    raw1:        int         = 0x00
-    gb1:         int         = 0x00
-    gb2:         int         = 0x00
-    gb3:         int         = 0x00
-    gb4:         int         = 0x00
-    drum_key:    int         = 0x3C
-    key:         str         = str()
-    sample_id:   str         = str()
-    t_output:    DirectTypes = DirectTypes.NULL
+    reverse:   bool        = bool()
+    fix_pitch: bool        = bool()
+    env_attn:  int         = 0x00
+    env_dcy:   int         = 0x00
+    env_sus:   int         = 0x00
+    env_rel:   int         = 0x00
+    raw0:      int         = 0x00
+    raw1:      int         = 0x00
+    gb1:       int         = 0x00
+    gb2:       int         = 0x00
+    gb3:       int         = 0x00
+    gb4:       int         = 0x00
+    drum_key:  int         = 0x3C
+    key:       str         = str()
+    smp_id:    str         = str()
+    out_type:  DirectTypes = DirectTypes.NULL
     # yapf: enable
 
 
@@ -322,11 +324,11 @@ class DrumKit(NamedTuple):
 class Event(NamedTuple):
     """Internal event"""
     # yapf: disable
-    command_byte: int = int()
-    param1:       int = int()
-    param2:       int = int()
-    param3:       int = int()
-    ticks:        int = int()
+    cmd_byte: int = int()
+    arg1:     int = int()
+    arg2:     int = int()
+    arg3:     int = int()
+    ticks:    int = int()
     # yapf: enable
 
 
@@ -354,13 +356,13 @@ class Note(NamedTuple):
     enable:       bool       = bool()
     note_off:     bool       = False
     env_dest:     float      = 0.0
-    env_step:     float      = 0.0
     env_pos:      float      = 0.0
+    env_step:     float      = 0.0
     wait_ticks:   float      = float()
     env_attn:     int        = int()
-    env_decay:    int        = int()
-    env_release:  int        = int()
-    env_sustain:  int        = int()
+    env_dcy:      int        = int()
+    env_rel:      int        = int()
+    env_sus:      int        = int()
     fmod_channel: int        = int()
     freq:         int        = int()
     note_num:     int        = int()
@@ -369,9 +371,9 @@ class Note(NamedTuple):
     unk_val:      int        = int()
     velocity:     int        = int()
     key:          str        = str()
-    sample_id:    str        = str()
-    t_output:     NoteTypes  = NoteTypes.NULL
-    note_phase:   NotePhases = NotePhases.INITIAL
+    smp_id:       str        = str()
+    out_type:     NoteTypes  = NoteTypes.NULL
+    phase:        NotePhases = NotePhases.INITIAL
     # yapf: enable
 
 
@@ -428,15 +430,15 @@ class Sample(NamedTuple):
             self._storage.insert(index, value)
 
     # yapf: disable
-    gb_wave:     bool      = bool()
-    loop_enable: bool      = bool()
-    smp_data:    bytearray = SampleDataBytes()
-    fmod_sample: int       = int()
-    freq:        int       = int()
-    loop_start:  int       = int()
-    size:        int       = int()
-    key:         str       = str()
-    sample_data: str       = str()
+    gb_wave:    bool      = bool()
+    loop:       bool      = bool()
+    smp_data:   bytearray = SampleDataBytes()
+    fmod_smp:   int       = int()
+    freq:       int       = int()
+    loop_start: int       = int()
+    size:       int       = int()
+    key:        str       = str()
+    smp_data:   str       = str()
     # yapf: enable
 
     @property
@@ -447,10 +449,10 @@ class Sample(NamedTuple):
     def rd_smp_data(self, id: int, t_size: int):
         """Read sample data as int from AGB rom."""
         file = File.from_id(id)
-        sample_data = bytearray()
+        smp_data = bytearray()
         for i in range(t_size):  # pylint: disable=W0612
-            sample_data.append(file.read_byte())
-        self.smp_data = self.SampleDataBytes(sample_data)
+            smp_data.append(file.read_byte())
+        self.smp_data = self.SampleDataBytes(smp_data)
 
     def sav_smp_data(self, id: int):
         """Save bytearray of sample data to AGB rom."""
@@ -462,6 +464,6 @@ class Sample(NamedTuple):
 class Subroutine(NamedTuple):
     """Internal AGB subroutine ID."""
     # yapf: disable
-    event_queue_pointer: int = int()
-    key:                 str = str()
+    evt_q_ptr: int = int()
+    key:       str = str()
     # yapf: enable
