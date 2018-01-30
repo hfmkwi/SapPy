@@ -2,19 +2,19 @@
 #-*- coding: utf-8 -*-
 # pylint: disable=C0103,C0123,C0326,R0901,R0903,R0913,R0914,W0221,W0622
 """Data-storage containers for internal use."""
-from collections import deque
+from collections import deque, UserDict
 from enum import Enum
 from typing import (Any, ItemsView, KeysView, MutableSequence, NamedTuple,
-                    Union, ValuesView)
+                    ValuesView)
 
 from fileio import File
 
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
            'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel',
-           'Direct', 'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note',
-           'NoteID', 'Sample', 'Subroutine')
+           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
+           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
+           'Sample', 'Subroutine')
 
 
 class ChannelTypes(Enum):
@@ -77,83 +77,68 @@ class NotePhases(Enum):
     # yapf: enable
 
 
-class Collection(deque):
+class Collection(deque, UserDict):
     """Imitation of the VB6 `Collection` data-container"""
-    __slots__ = ('_storage', '_key_store', '_list', 'log')
 
     def __init__(self):
-        super().__init__()
-        self._key_store = {}
-        self._list = None
+        deque.__init__(self)
+        UserDict.__init__(self)
 
     def __contains__(self, item: Any) -> bool:
-        return super().__contains__(item) or item in self._key_store
+        return deque.__contains__(self, item) or item in self.data
 
     def __delitem__(self, item: int) -> bool:
-        out = super().__getitem__(item)
-        super().__delitem__(item)
-        if out in self._key_store:
-            del self._key_store[out]
+        out = deque.__getitem__(self, item)
+        deque.__delitem__(self, item)
+        self.data.pop(out)
 
     def __eq__(self, other) -> bool:
-        return super().__eq__(other) and self.items() == other.items()
+        return deque.__eq__(self, other) and self.data == other.data
 
     def __getitem__(self, key: int) -> Any:
-        out = super().__getitem__(key)
-        if out not in self._key_store:
+        out = deque.__getitem__(self, key)
+        if out not in UserDict.keys(self):
             return out
-        return self._key_store[out]
+        return self.data[out]
 
     def __hash__(self):
-        return hash((super().__iter__(), tuple(self._key_store)))
+        return hash((deque.__iter__(self), tuple(self.data)))
 
     def __ne__(self, other) -> bool:
-        return super().__ne__(other) and self.items() != other.items()
+        return deque.__ne__(self, other) and self.data != other.data
 
     def clear(self):
         """Clear all of storage and the keystore."""
-        super().clear()
-        self._key_store.clear()
+        deque.clear(self)
+        UserDict.clear(self)
 
     def item(self, key: str):
         """Get value from key"""
-        return self._key_store[key]
+        return self.data[key]
 
-    def items(self) -> ItemsView:
-        """Key/Value pairs in keystore"""
-        return self._key_store.items()
-
-    def keys(self) -> KeysView:
-        """Keys in keystore"""
-        return self._key_store.keys()
-
-    def key_append(self, item: Any, key: str) -> None:
+    def key_append(self, item: Any, key: Any) -> None:
         """Append an item to end of storage.
 
         Args:
         key: A string reference to the item's index.
 
         """
-        if key in self._key_store:
+        if key in self.data:
             raise KeyError('Key in use.')
-        self._key_store[key] = item
+        self.data[key] = item
         self.append(key)
 
-    def key_insert(self, item: Any, key: str, ind: int = None):
+    def key_insert(self, item: Any, key: Any, ind: int = None):
         """Insert an item at the specified index within storage."""
-        if key in self._key_store:
+        if key in self.data:
             raise KeyError('Key in use.')
-        self._key_store[key] = item
+        self.data[key] = item
         self.insert(ind, key)
 
     def remove(self, key: str):
         ind = super().index(key)
         super().__delitem__(ind)
-        del self._key_store[key]
-
-    def values(self) -> ValuesView:
-        """Values in keystore"""
-        return self._key_store.values()
+        del self.data[key]
 
     count = property(fget=deque.__len__)
 
