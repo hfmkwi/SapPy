@@ -5,16 +5,16 @@
 from collections import deque, UserDict
 from enum import Enum
 from typing import (Any, ItemsView, KeysView, MutableSequence, NamedTuple,
-                    ValuesView)
+                    Union, ValuesView)
 
 from fileio import File
 
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
            'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel',
-           'Direct', 'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note',
-           'NoteID', 'Sample', 'Subroutine')
+           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
+           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
+           'Sample', 'Subroutine')
 
 
 class ChannelTypes(Enum):
@@ -78,7 +78,64 @@ class NotePhases(Enum):
 
 
 class Collection(deque, UserDict):
-    """Imitation of the VB6 `Collection` data-container"""
+    """Imitation of the VB6 `Collection` data-container
+
+    This container behaves similarly to both a list and a dictionary. An item
+    may be appended or inserted with or without a key. If an item is added with
+    a key, the key is added to the keystore and inserted into the deque in
+    place of its associated value.
+
+    An item can be accessed via it's index in the deque. A keyed item can be
+    accessed by the passing a valid key to the `item` method or retrieving the
+    key from the deque via its index and subsequently passing the key to the
+    `item` method.
+
+    Attributes
+    ----------
+    data : dict
+        The keystore; holds all keys and their respective values.
+    count : int
+        The number of items inside the deque. Wrapper around `deque.__len__`
+
+    Notes
+    -----
+        To allow keyed elements to be accessed via index, a copy of the key is
+        appended to the internal deque. The key is directly accesible via index
+        and can be used to lookup its paired value in the keystore.
+
+    Examples
+    --------
+        >>> c = Collection()
+        >>> c.append(1)
+        >>> c[0]
+        1
+        >>> del c[0]
+        >>> len(c)
+        0
+        >>> c.key_append(0xBEEF, 'test')
+        >>> c.item('test')
+        48879
+        >>> c[0]
+        'test'
+        >>> c.item(c[0])
+        48879
+        >>> 'test' in c
+        True
+        >>> 48879 in c
+        True
+        >>> c.key_insert(0xDEAD, 'beef', 0)
+        >>> print(c)
+        deque(['beef', 'test'])
+        >>> c[1]
+        'test'
+        >>> d = Collection()
+        >>> c.clear()
+        >>> d == c
+        True
+        >>> d != c
+        False
+
+    """
 
     def __init__(self):
         deque.__init__(self)
@@ -92,19 +149,13 @@ class Collection(deque, UserDict):
         deque.__delitem__(self, item)
         self.data.pop(out)
 
-    def __eq__(self, other) -> bool:
+    def __eq__(self, other: 'Container') -> bool:
         return deque.__eq__(self, other) and self.data == other.data
-
-    def __getitem__(self, key: int) -> Any:
-        out = deque.__getitem__(self, key)
-        if out not in UserDict.keys(self):
-            return out
-        return self.data[out]
 
     def __hash__(self):
         return hash((deque.__iter__(self), tuple(self.data)))
 
-    def __ne__(self, other) -> bool:
+    def __ne__(self, other: 'Container') -> bool:
         return deque.__ne__(self, other) and self.data != other.data
 
     def add(self, *args):
@@ -114,10 +165,10 @@ class Collection(deque, UserDict):
     def clear(self):
         """Clear all of storage and the keystore."""
         deque.clear(self)
-        UserDict.clear(self)
+        self.data.clear()
 
     def item(self, key: str):
-        """Get value from key"""
+        """Get value from key or index"""
         return self.data[key]
 
     def key_append(self, item: Any, key: Any) -> None:
@@ -140,8 +191,8 @@ class Collection(deque, UserDict):
         self.insert(ind, key)
 
     def remove(self, key: str):
-        ind = super().index(key)
-        super().__delitem__(ind)
+        ind = deque.index(self, key)
+        deque.__delitem__(self, ind)
         del self.data[key]
 
     count = property(fget=deque.__len__)
@@ -178,12 +229,12 @@ class EventQueue(Collection):
     def add(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int,
             key: str) -> None:
         event = Event(
-            key          = key,
-            ticks        = ticks,
+            key      = key,
+            ticks    = ticks,
             cmd_byte = cmd_byte,
-            arg1       = arg1,
-            arg2       = arg2,
-            arg3       = arg3
+            arg1     = arg1,
+            arg2     = arg2,
+            arg3     = arg3
         )
         self.append(event)
     # yapf: enable
@@ -194,7 +245,7 @@ class InstrumentQueue(Collection):
 
     def add(self, key: str) -> None:
         instrument = Instrument(key=key)
-        super().key_append(instrument, key)
+        self.key_append(instrument, key)
 
 
 class KeyMapQueue(Collection):
@@ -202,7 +253,7 @@ class KeyMapQueue(Collection):
 
     def add(self, assign_dct: int, key: str) -> None:
         kmap = KeyMap(key=key, assign_dct=assign_dct)
-        super().key_append(kmap, key)
+        self.key_append(kmap, key)
 
 
 class NoteQueue(Collection):
@@ -211,7 +262,7 @@ class NoteQueue(Collection):
     # yapf: disable
     def add(self, enable: bool, fmod_channel: int, note_num: int,
             freq: int, velocity: int, parent: int, unk_val: int,
-            out_type: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
+            output: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
             env_rel: int, wait_ticks: int, patch_num: int,
             key: str) -> None:
         """Initialize and append a new note."""
@@ -226,13 +277,14 @@ class NoteQueue(Collection):
             parent       = parent,
             smp_id       = env_rel,
             unk_val      = unk_val,
-            out_type     = out_type,
+            output       = output,
             env_attn     = env_attn,
             env_dcy      = env_dcy,
             env_sus      = env_sus,
             env_rel      = env_rel,
-            wait_ticks   = wait_ticks)
-        super().key_append(note, key)
+            wait_ticks   = wait_ticks
+        )
+        self.key_append(note, key)
         # yapf: enable
 
 
@@ -241,7 +293,7 @@ class NoteIDQueue(Collection):
 
     def add(self, note_id: int, key: str) -> None:
         note = NoteID(key=key, note_id=note_id)
-        super().key_append(note, key)
+        self.key_append(note, key)
 
 
 class SampleQueue(Collection):
@@ -249,7 +301,7 @@ class SampleQueue(Collection):
 
     def add(self, key: str) -> None:
         sample = Sample(key=key)
-        super().key_append(sample, key)
+        self.key_append(sample, key)
 
 
 class SubroutineQueue(Collection):
@@ -257,7 +309,7 @@ class SubroutineQueue(Collection):
 
     def add(self, evt_q_ptr: int, key: str) -> None:
         subroutine = Subroutine(key=key, evt_q_ptr=evt_q_ptr)
-        super().key_append(subroutine, key)
+        self.key_append(subroutine, key)
 
 
 class Channel(NamedTuple):
@@ -284,7 +336,7 @@ class Channel(NamedTuple):
     vib_depth:    int             = int()
     vib_rate:     int             = int()
     key:          str             = str()
-    out_type:     ChannelTypes    = ChannelTypes.NULL
+    output:     ChannelTypes    = ChannelTypes.NULL
     evt_queue:    EventQueue      = EventQueue()
     notes:        NoteQueue       = NoteQueue()
     subs:         SubroutineQueue = SubroutineQueue()
@@ -309,7 +361,7 @@ class Direct(NamedTuple):
     drum_key:  int         = 0x3C
     key:       str         = str()
     smp_id:    str         = str()
-    out_type:  DirectTypes = DirectTypes.NULL
+    output:  DirectTypes = DirectTypes.NULL
     # yapf: enable
 
 
@@ -372,7 +424,7 @@ class Note(NamedTuple):
     velocity:     int        = int()
     key:          str        = str()
     smp_id:       str        = str()
-    out_type:     NoteTypes  = NoteTypes.NULL
+    output:       NoteTypes  = NoteTypes.NULL
     phase:        NotePhases = NotePhases.INITIAL
     # yapf: enable
 

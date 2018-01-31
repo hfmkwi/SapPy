@@ -1,6 +1,8 @@
 #!/usr/bin/python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0103, C0326, E1120, R0902, R0903, R0913, W0511
+# pylint: disable=C0103, C0326, E1120, R0902, R0903, R0904, R0912, R0913, R0914, R0915, R1702
+# pylint: disable=W0401, W0511, W0614
+# TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
 from enum import Enum
 from logging import INFO, basicConfig, getLogger
@@ -77,6 +79,8 @@ class Decoder(object):
 
     @property
     def gbl_vol(self) -> int:
+        """Global volume of the player."""
+        #TODO: Actually change the volume of whatever sound API I'm using
         return self._gbl_vol
 
     @gbl_vol.setter
@@ -85,25 +89,28 @@ class Decoder(object):
 
     @staticmethod
     def dct_exists(dcts: DirectQueue, dct_id: int) -> bool:
+        """Check if a direct exists in a specfied `DirectQueue`."""
         return str(dct_id) in dcts
 
     @staticmethod
     def flip_lng(val: int) -> int:
+        """Truncate and flip the byteorder of a 4 byte integer."""
         return int.from_bytes(val.to_bytes(4, 'big'), 'little')
 
     @staticmethod
     def flip_int(val: int) -> int:
+        """Truncate and flip the byteorder of a 2 byte integer."""
         return int.from_bytes(val.to_bytes(2, 'big'), 'little')
 
     @staticmethod
-    def set_direct(queue: Collection, dct_key: str, inst_head: InstrumentHeader,
+    def set_direct(queue: DirectQueue, dct_key: str, inst_head: InstrumentHeader,
                    dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
+        """UKNOWN"""
         # yapf: disable
-
         direct = queue.directs[dct_key]
-        direct = Direct(
+        queue.directs[dct_key] = Direct(
             drum_key  = inst_head.drum_pitch,
-            out_type  = DirectTypes(inst_head.channel & 7),
+            output    = DirectTypes(inst_head.channel & 7),
             env_attn  = dct_head.attack,
             env_dcy   = dct_head.hold,
             env_sus   = dct_head.sustain,
@@ -123,6 +130,7 @@ class Decoder(object):
 
     @staticmethod
     def write_var_len(ch: int, val: int) -> None:
+        """UNKNOWN"""
         buf = ch & 0x7F
         while val // 128 > 0:
             val //= 128
@@ -136,40 +144,41 @@ class Decoder(object):
             buf //= 256
 
     def add_ear_piercer(self, inst_id: int):
+        """UNKNOWN"""
         self.rip_ears.append(inst_id)
-        # self.rip_ears[self.rip_ear_cnt] = inst_id
-        # self.rip_ear_cnt += 1
 
     def buffer_evt(self, evt_code: str, ticks: int) -> None:
+        """UNKNOWN"""
         self.mfile: File
         if not self.record or self.mfile.file_id != 42:
             return
-        d_raw=ticks - self.last_evt.ticks
-        evt_code=int(evt_code)
-        evt = RawMidiEvent(
-            ticks=ticks,
-            d_raw=d_raw,
-            evt_code=evt_code)
+        d_raw = ticks - self.last_evt.ticks
+        evt_code = int(evt_code)
+        evt = RawMidiEvent(ticks=ticks, d_raw=d_raw, evt_code=evt_code)
         self.write_var_len(self.mfile.file_id, evt.d_raw)
         self.mfile.write_string(evt.evt_code)
         self.last_evt = evt
 
     def clear_mpatch_map(self):
+        """Clear the MIDI patch map, the MIDI drum map, and the ear piercers."""
         self.mpatch_map.clear()
         self.mdrum_map.clear()
         self.rip_ears.clear()
 
     def drm_exists(self, patch: int) -> bool:
+        """Check if a drumkit on the specified MIDI patch exists."""
         return str(patch) in self.drmkits
 
     def evt_processor_timer(self, msec: int) -> bool:
+        """UKNOWN"""
         self.ttl_msecs += msec
         if self.tick_ctr:
             for i in range(32):
                 note = self.note_arr[i]
+                note: Note
                 if note.enable and note.wait_ticks > 0:
                     w_ticks = note.wait_ticks - (self.tick_ctr - self.prv_tick)
-                    self.note_arr[i] = note._replace()
+                    self.note_arr[i] = note._replace(wait_ticks=w_ticks)
                 if note.wait_ticks <= 0 and note.enable and not note.note_off:
                     if not self.channels[note.parent].sustain:
                         self.note_arr[i] = note._replace(note_off=True)
@@ -182,6 +191,18 @@ class Decoder(object):
                         self.channels[i] = channel._replace(mute=True)
 
     def free_note(self) -> int:
+        """Get a free note number.
+
+        Notes
+        ----
+        On an actual AGB, only up to 32 notes may be played in tandem.
+
+        Returns
+        -------
+        int
+            On success, a number between 0 and 32. -1 otherwise.
+        """
+        note = -1
         for i in range(32):
             if not self.note_arr[i].enable:
                 note = i
@@ -189,13 +210,14 @@ class Decoder(object):
 
     def get_smp(self, q: Collection, dct_key: str, dct_head: DirectHeader,
                 smp_head: SampleHeader, use_readstr: bool) -> None:
+        """UNKNOWN"""
         dct_q = q.directs
         dct_q[dct_key] = dct_q[dct_key]._replace(
             smp_id=dct_head.smp_head)
         s_id = dct_q[dct_key].smp_id
         if not self.smp_exists(s_id):
             self.smp_pool.add(str(s_id))
-            if dct_q[dct_key].out_type == DirectTypes.DIRECT:
+            if dct_q[dct_key].output == DirectTypes.DIRECT:
                 self.smp_head = rd_smp_head(
                     File.gba_ptr_to_addr(s_id))
                 if use_readstr:
@@ -236,22 +258,27 @@ class Decoder(object):
     get_multi_smp = get_smp
 
     def inst_exists(self, patch: int) -> bool:
+        """Check if an instrument on the specified MIDI patch is defined."""
         return str(patch) in self.insts
 
     @staticmethod
     def kmap_exists(kmaps: KeyMapQueue, kmap_id: int) -> bool:
+        """Check if a keymap is defined."""
         return str(kmap_id) in kmaps
 
-    def note_belongs_to_channel(self, note_id: bytes, chnl_id: int) -> bool:
+    def note_in_channel(self, note_id: bytes, chnl_id: int) -> bool:
+        """Check if a note belongs to a channel."""
         return self.note_arr[note_id].parent == chnl_id
 
     def patch_exists(self, lp: int) -> bool:
+        """UKNOWN"""
         lp = str(lp)
         return lp in self.directs or self.inst_exists(lp) or self.drm_exists(lp)
 
     # yapf: disable
     def play_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None,
                   record: bool = False, record_to: str = "midiout.mid"):
+        """Play a song from an AGB rom that uses the Sappy Sound Engine."""
         # yapf: enable
         self.fpath = fpath
         self.sng_lst_ptr = sng_list_ptr
@@ -332,11 +359,13 @@ class Decoder(object):
             while True:
                 self.wfile.rd_addr = pgm_ctr
                 print(pgm_ctr)
-                if pgm_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
-                    self.channels[i] = channel._replace(loop_ptr=channel.evt_queue.count + 1)
+                chk_loop_addr = pgm_ctr >= loop_addr and loop_addr != -1
+                if chk_loop_addr and channel.loop_ptr == -1:
+                    loop_ptr = channel.evt_queue.count + 1
+                    self.channels[i] = channel._replace(loop_ptr=loop_ptr)
                 ctl_byte = self.wfile.rd_byte()
-                if (ctl_byte != 0xb9 and ctl_byte >= 0xb5 and
-                        ctl_byte < 0xc5) or ctl_byte == 0xcd:
+                chk_byte_rg = ctl_byte >= 0xb5 and ctl_byte < 0xc5
+                if (chk_byte_rg and ctl_byte != 0xb9) or ctl_byte == 0xcd:
                     cmd_arg = self.wfile.rd_byte()
                     if ctl_byte == 0xbc:
                         transpose = sbyte_to_int(cmd_arg)
@@ -344,16 +373,16 @@ class Decoder(object):
                         lp = cmd_arg
                     elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
                         ctrl = ctl_byte
-                    self.channels[i].evt_queue.add(cticks, ctl_byte, cmd_arg,
-                                                     0, 0)
+                    evt_args = (cticks, ctl_byte, cmd_arg, 0, 0)
+                    self.channels[i].evt_queue.add(*evt_args)
                 elif ctl_byte > 0xc4 and ctl_byte < 0xcf:
                     self.channels[i].evt_queue.add(cticks, ctl_byte, 0, 0, 0)
                 elif ctl_byte == 0xb9:
                     cmd_arg = self.wfile.rd_byte()
                     e = self.wfile.rd_byte()
                     f = self.wfile.rd_byte()
-                    self.channels[i].evt_queue.add(cticks, ctl_byte, cmd_arg,
-                                                     e, f)
+                    evt_args = cticks, ctl_byte, cmd_arg, e, f
+                    self.channels[i].evt_queue.add(*evt_args)
                     pgm_ctr += 4
                 elif ctl_byte == 0xb4:
                     if insub == 1:
@@ -365,7 +394,7 @@ class Decoder(object):
                     rpc = pgm_ctr + 5
                     in_sub = 1
                     pgm_ctr = self.wfile.rd_gba_ptr()
-                elif ctl_byte >= 0xcf and ctl_byte <= 0xff:
+                elif 0xcf <= ctl_byte <= 0xff:
                     pgm_ctr += 1
                     ctrl = ctl_byte
                     g = False
@@ -375,8 +404,8 @@ class Decoder(object):
                         if cmd_arg >= 0x80:
                             if not nc:
                                 pn = lln[nc] + transpose
-                            self.channels[i].evt_queue.add(
-                                cticks, ctl_byte, pn, llv[nc], lla[nc])
+                            evt_args = cticks, ctl_byte, pn, llv[nc], lla[nc]
+                            self.channels[i].evt_queue.add(*evt_args)
                             g = True
                         else:
                             lln[nc] = cmd_arg
@@ -398,8 +427,8 @@ class Decoder(object):
                                 f = lla[nc]
                                 g = True
                             pn = cmd_arg + transpose
-                            self.channels[i].evt_queue.add(
-                                cticks, ctl_byte, pn, e, f)
+                            evt_args = cticks, ctl_byte, pn, e, f
+                            self.channels[i].evt_queue.add(*evt_args)
                         if not self.patch_exists(lp):
                             inst_ptr = self.inst_tbl_ptr + lp * 12
                             inst_head = rd_inst_head(1, inst_ptr)
@@ -408,7 +437,7 @@ class Decoder(object):
                             s_cdr = str(cdr)
                             if inst_head.channel & 0x80 == 0x80:
                                 self.drm_head = rd_drmkit_head(1)
-                                drm_ptr = drm_head.dct_tbl + pn * 12
+                                drm_ptr = self.drm_head.dct_tbl + pn * 12
                                 inst_ptr = self.wfile.gba_ptr_to_addr(drm_ptr)
                                 self.inst_head = rd_inst_head(1, inst_ptr)
                                 self.dct_head = rd_dct_head(1)
@@ -416,15 +445,16 @@ class Decoder(object):
                                 self.gb_head = rd_nse_head(1, nse_ptr)
                                 self.drmkits.add(s_lp)
                                 self.drmkits[s_lp].add(s_pn)
-                                self.set_direct(self.drmkits[s_lp], s_pn,
-                                               self.inst_head, self.dct_head,
-                                               self.gb_head)
+                                drmkit = self.drmkits[s_lp]
+                                hd = self.inst_head, self.dct_head, self.gb_head
+                                dct_args = drmkit, s_pn, *hd
+                                self.set_direct(*dct_args)
                                 smp_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
-                                dct_out = self.insts[s_lp].directs[s_cdr].out_type
+                                dct_out = self.insts[s_lp].directs[s_cdr].output
                                 if dct_out in smp_out:
-                                    self.get_smp(self.drmkits[s_lp],
-                                                    s_pn, self.dct_head,
-                                                    self.smp_head, False)
+                                    hd = self.dct_head, self.smp_head
+                                    smp_args = drmkit, s_pn, *hd, False
+                                    self.get_smp(smp_args)
                             elif inst_head.channel & 0x40 == 0x40:
                                 mul_head = rd_mul_head(1)
                                 self.insts.add(s_lp)
@@ -434,17 +464,20 @@ class Decoder(object):
 
 
     def smp_exists(self, smp_id: int) -> bool:
+        """Check if a sample exists in the available sample pool."""
         return str(smp_id) in self.smp_pool
 
     def set_mpatch_map(self, ind: int, inst: int, transpose: int) -> None:
+        """Bind a MIDI instrument to a specified MIDI key."""
         self.mpatch_map[ind] = inst
         self.mpatch_tbl[ind] = transpose
 
     def set_mdrum_map(self, ind: int, new_drum: int) -> None:
+        """Bind a MIDI drum to a specified MIDI key."""
         self.mdrum_map[ind] = new_drum
 
-
     def stop_song(self):
+        """Stop playing a song."""
         File.from_id(1).close()
         File.from_id(2).close()
         # TODO: disable event processor
@@ -456,8 +489,8 @@ class Decoder(object):
             self.mfile = File.from_id(42)
             self.mfile.write_little_endian(0x0AFF2F00)
             trk_len = self.mfile.size - 22
-            self.log.debug('StopSong(): Track length: %s, total ticks: %s',
-                            trk_len, self.ttl_ticks)
+            dbg_vars = trk_len, self.ttl_ticks
+            self.log.debug('StopSong(): Length: %s, total ticks: %s', *dbg_vars)
             self.mfile.write_little_endian(unpack(self.flip_lng(trk_len), 0x13))
         # TODO: raise SONG_FINISH
 
