@@ -255,7 +255,7 @@ class Decoder(object):
                     smp_data=smp_data
                 )
 
-    get_multi_smp = get_smp
+    get_mul_smp = get_smp
 
     def inst_exists(self, patch: int) -> bool:
         """Check if an instrument on the specified MIDI patch is defined."""
@@ -288,12 +288,12 @@ class Decoder(object):
             # TODO: raise SONG_STOP
             pass
 
-        self.inst_head = InstrumentHeader
-        self.drm_head = DrumKitHeader
-        self.dct_head = DirectHeader
-        self.smp_head = SampleHeader
-        self.mul_head = MultiHeader
-        self.gb_head = NoiseHeader
+        self.inst_head = InstrumentHeader()
+        self.drm_head = DrumKitHeader()
+        self.dct_head = DirectHeader()
+        self.smp_head = SampleHeader()
+        self.mul_head = MultiHeader()
+        self.gb_head = NoiseHeader()
 
         self.channels.clear()
         self.drmkits.clear()
@@ -352,37 +352,37 @@ class Decoder(object):
             lp = 0
             src2 = 1
             insub = 0
-            transpose = 0
-            self.channels[i] = self.channels[i]._replace(track_ptr=-1)
-            channel = self.channels[i]
+            trnps = 0
+            channels = self.channels
+            cur_ch = channels[i]._replace(track_ptr=-1)
             input()
             while True:
                 self.wfile.rd_addr = pgm_ctr
                 print(pgm_ctr)
                 chk_loop_addr = pgm_ctr >= loop_addr and loop_addr != -1
-                if chk_loop_addr and channel.loop_ptr == -1:
-                    loop_ptr = channel.evt_queue.count + 1
-                    self.channels[i] = channel._replace(loop_ptr=loop_ptr)
+                if chk_loop_addr and cur_ch.loop_ptr == -1:
+                    loop_ptr = cur_ch.evt_queue.count + 1
+                    channels[i] = cur_ch._replace(loop_ptr=loop_ptr)
                 ctl_byte = self.wfile.rd_byte()
-                chk_byte_rg = ctl_byte >= 0xb5 and ctl_byte < 0xc5
+                chk_byte_rg = 0xb5 <= ctl_byte < 0xc5
                 if (chk_byte_rg and ctl_byte != 0xb9) or ctl_byte == 0xcd:
                     cmd_arg = self.wfile.rd_byte()
                     if ctl_byte == 0xbc:
-                        transpose = sbyte_to_int(cmd_arg)
+                        trnps = sbyte_to_int(cmd_arg)
                     elif ctl_byte == 0xbd:
                         lp = cmd_arg
                     elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
                         ctrl = ctl_byte
-                    evt_args = (cticks, ctl_byte, cmd_arg, 0, 0)
-                    self.channels[i].evt_queue.add(*evt_args)
-                elif ctl_byte > 0xc4 and ctl_byte < 0xcf:
-                    self.channels[i].evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+                    e_args = (cticks, ctl_byte, cmd_arg, 0, 0)
+                    channels[i].evt_queue.add(*e_args)
+                elif 0xc4 < ctl_byte < 0xcf:
+                    channels[i].evt_queue.add(cticks, ctl_byte, 0, 0, 0)
                 elif ctl_byte == 0xb9:
                     cmd_arg = self.wfile.rd_byte()
                     e = self.wfile.rd_byte()
                     f = self.wfile.rd_byte()
-                    evt_args = cticks, ctl_byte, cmd_arg, e, f
-                    self.channels[i].evt_queue.add(*evt_args)
+                    e_args = cticks, ctl_byte, cmd_arg, e, f
+                    channels[i].evt_queue.add(*e_args)
                     pgm_ctr += 4
                 elif ctl_byte == 0xb4:
                     if insub == 1:
@@ -398,69 +398,224 @@ class Decoder(object):
                     pgm_ctr += 1
                     ctrl = ctl_byte
                     g = False
-                    nc = 0
+                    n_ctr = 0
                     while not g:
                         cmd_arg = self.wfile.rd_byte()
                         if cmd_arg >= 0x80:
-                            if not nc:
-                                pn = lln[nc] + transpose
-                            evt_args = cticks, ctl_byte, pn, llv[nc], lla[nc]
-                            self.channels[i].evt_queue.add(*evt_args)
+                            if not n_ctr:
+                                pn = lln[n_ctr] + trnps
+                            l_args = llv[n_ctr], lla[n_ctr]
+                            e_args = cticks, ctl_byte, pn, *l_args
+                            channels[i].evt_queue.add(*e_args)
                             g = True
                         else:
-                            lln[nc] = cmd_arg
+                            lln[n_ctr] = cmd_arg
                             pgm_ctr += 1
                             e = self.wfile.rd_byte()
                             if e < 0x80:
-                                llv[nc] = e
+                                llv[n_ctr] = e
                                 pgm_ctr += 1
                                 f = self.wfile.rd_byte()
                                 if f >= 0x80:
-                                    f = lla[nc]
+                                    f = lla[n_ctr]
                                     g = True
                                 else:
-                                    lla[nc] = f
+                                    lla[n_ctr] = f
                                     pgm_ctr += 1
-                                    nc += 1
+                                    n_ctr += 1
                             else:
-                                e = llv[nc]
-                                f = lla[nc]
+                                e = llv[n_ctr]
+                                f = lla[n_ctr]
                                 g = True
-                            pn = cmd_arg + transpose
-                            evt_args = cticks, ctl_byte, pn, e, f
-                            self.channels[i].evt_queue.add(*evt_args)
+                            pn = cmd_arg + trnps
+                            e_args = cticks, ctl_byte, pn, e, f
+                            channels[i].evt_queue.add(*e_args)
                         if not self.patch_exists(lp):
                             inst_ptr = self.inst_tbl_ptr + lp * 12
-                            inst_head = rd_inst_head(1, inst_ptr)
+                            self.inst_head = rd_inst_head(1, inst_ptr)
                             s_lp = str(lp)
                             s_pn = str(pn)
-                            s_cdr = str(cdr)
-                            if inst_head.channel & 0x80 == 0x80:
+                            smp_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
+                            if self.inst_head.channel & 0x80 == 0x80:
                                 self.drm_head = rd_drmkit_head(1)
                                 drm_ptr = self.drm_head.dct_tbl + pn * 12
-                                inst_ptr = self.wfile.gba_ptr_to_addr(drm_ptr)
+                                inst_ptr = File.gba_ptr_to_addr(drm_ptr)
                                 self.inst_head = rd_inst_head(1, inst_ptr)
                                 self.dct_head = rd_dct_head(1)
-                                nse_ptr = self.wfile.gba_ptr_to_addr(drm_ptr + 2)
+                                nse_ptr = File.gba_ptr_to_addr(drm_ptr + 2)
                                 self.gb_head = rd_nse_head(1, nse_ptr)
                                 self.drmkits.add(s_lp)
-                                self.drmkits[s_lp].add(s_pn)
-                                drmkit = self.drmkits[s_lp]
-                                hd = self.inst_head, self.dct_head, self.gb_head
-                                dct_args = drmkit, s_pn, *hd
+                                drmkits = self.drmkits
+                                drmkits[s_lp].add(s_pn)
+                                drmkit = drmkits[s_lp]
+                                h = self.inst_head, self.dct_head, self.gb_head
+                                dct_args = drmkit, s_pn, *h
                                 self.set_direct(*dct_args)
-                                smp_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
-                                dct_out = self.insts[s_lp].directs[s_cdr].output
+                                dcts = self.insts[s_lp].directs
+                                dct_out = dcts[s_cdr].output
                                 if dct_out in smp_out:
                                     hd = self.dct_head, self.smp_head
                                     smp_args = drmkit, s_pn, *hd, False
-                                    self.get_smp(smp_args)
-                            elif inst_head.channel & 0x40 == 0x40:
-                                mul_head = rd_mul_head(1)
+                                    self.get_smp(*smp_args)
+                            elif self.inst_head.channel & 0x40 == 0x40: # Multi
+                                self.mul_head = rd_mul_head(1)
                                 self.insts.add(s_lp)
-                                self.insts[s_lp].kmaps.add(0, s_pn)
-                                kmap_dct = self.insts[s_lp].kmaps[s_pn]
-                                self.insts[s_lp].kmaps[s_pn] = kmap_dct._replace()
+                                kmaps = self.insts[s_lp].kmaps
+                                kmaps.add(0, s_pn)
+                                dct = kmaps[s_pn]
+                                mul_ptr = File.gba_ptr_to_addr(self.mul_head)
+                                kmap_ptr = mul_ptr + pn
+                                dct_byte = self.wfile.rd_byte(kmap_ptr)
+                                kmaps[s_pn] = dct._replace(assign_dct=dct_byte)
+                                cdr = kmaps[s_pn].assign_dct
+                                s_cdr = str(cdr)
+                                inst_ptr = self.mul_head.dct_tbl + cdr * 12
+                                inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                self.inst_head = rd_inst_head(1, inst_addr)
+                                dct_head = rd_dct_head(1)
+                                nse_ptr = inst_ptr + 2
+                                nse_addr = File.gba_ptr_to_addr(nse_ptr)
+                                self.gb_head = rd_nse_head(1, nse_addr)
+                                dcts = self.insts[s_lp].directs
+                                dcts.add(s_cdr)
+                                h = self.inst_head, self.dct_head, self.gb_head
+                                dct_args = dcts, s_cdr, *h
+                                self.set_direct(*dct_args)
+                                if dcts[s_cdr].output in smp_out:
+                                    h = self.dct_head, self.smp_head
+                                    self.get_smp(dcts[s_cdr], *h, False)
+                            else: # Direct/GB Sample
+                                self.dct_head = rd_dct_head(1)
+                                nse_addr = self.inst_tbl_ptr + lp * 12 + 2
+                                self.gb_head = rd_nse_head(1, nse_addr)
+                                self.directs.add(s_lp)
+                                h = self.inst_head, self.dct_head, self.gb_head
+                                dct_args = self.directs, s_lp, *h
+                                self.set_direct(*dct_args)
+                        else: # Patch exists
+                            inst_addr = self.inst_tbl_ptr + lp * 12
+                            self.inst_head = rd_inst_head(1, inst_addr)
+                            if self.inst_head.channel & 0x80 == 0x80:
+                                self.drm_head = rd_drmkit_head(1)
+                                inst_ptr = self.drm_head.dct_tbl + pn * 12
+                                inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                self.inst_head = rd_inst_head(1, inst_addr)
+                                self.dct_head = rd_dct_head(1)
+                                gb_ptr = inst_ptr + 2
+                                gb_addr = File.gba_ptr_to_addr(gb_ptr)
+                                self.gb_head = rd_nse_head(1, gb_addr)
+                                dcts = self.drmkits[s_lp].directs
+                                if not self.dct_exists(dcts, pn):
+                                    dcts.add(s_pn)
+                                    h = (
+                                        self.inst_head,
+                                        self.dct_head,
+                                        self.gb_head
+                                    )
+                                    dct_args = dcts, s_pn, *h
+                                    self.set_direct(*dct_args)
+                                    if dcts[s_pn].output in smp_out:
+                                        h = self.dct_head, self.smp_head
+                                        mul_args = dcts, s_pn, *h, False
+                                        self.get_mul_smp(*mul_args)
+                            elif self.inst_head.channel * 0x40 == 0x40:
+                                self.mul_head = rd_mul_head(1)
+                                kmaps = self.insts[s_lp].kmaps
+                                if not self.kmap_exists(kmaps, pn):
+                                    k_ptr = self.mul_head.kmap
+                                    k_addr = self.wfile.gba_ptr_to_addr(k_ptr)
+                                    k_addr = k_addr + pn
+                                    kmaps.add(self.wfile.rd_byte(k_addr), s_pn)
+                                    cdr = kmaps[s_pn].assign_dct
+                                    s_cdr = str(cdr)
+                                    inst_ptr = self.mul_head.dct_tbl + cdr * 12
+                                    inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                    self.inst_head = rd_inst_head(1, inst_addr)
+                                    self.dct_head = rd_dct_head(1)
+                                    nse_ptr = inst_addr + 2
+                                    self.gb_head = rd_nse_head(1, nse_ptr)
+                                    dcts = self.insts[s_lp].directs
+                                    if not self.dct_exists(dcts, cdr):
+                                        dcts.add(s_cdr)
+                                        h = (
+                                            self.inst_head,
+                                            self.dct_head,
+                                            self.gb_head
+                                        )
+                                        dct_args = dcts, s_cdr, *h
+                                        self.set_direct(*dct_args)
+                                        if dcts[s_cdr].output in smp_out:
+                                            h = self.dct_head, self.smp_head
+                                            m_args = dcts, s_cdr, *h, False
+                                            self.get_mul_smp(*m_args)
+                elif 0x00 <= ctl_byte < 0x80:
+                    if ctrl < 0xCF:
+                        evt_q = self.channels[i].evt_q
+                        evt_q.add(cticks, ctrl, c, 0, 0)
+                        pgm_ctr += 1
+                    else:
+                        c = ctrl
+                        self.wfile.read_offset = pgm_ctr
+                        g = False
+                        n_ctr = 0
+                        while not g:
+                            d = self.wfile.rd_byte()
+                            if d >= 0x80:
+                                if not n_ctr:
+                                    pn = lln[n_ctr] + trnps
+                                    evt_q.add(cticks, c, pn, llv[n_ctr], lla[n_ctr])
+                            else:
+                                lln[n_ctr] = d
+                                pgm_ctr += 1
+                                e = self.wfile.rd_byte()
+                                if e < 0x80:
+                                    llv[n_ctr] = e
+                                    pgm_ctr += 1
+                                    f = self.wfile.rd_byte()
+                                    if f >= 0x80:
+                                        f = lla[n_ctr]
+                                        g = True
+                                    else:
+                                        lla[n_ctr] = f
+                                        pgm_ctr += 1
+                                        n_ctr += 1
+                                else:
+                                    e = llv[n_ctr]
+                                    f = lla[n_ctr]
+                                    g = True
+                                pn = d + trnps
+                                evt_q.add(cticks, c, pn, e, f)
+                            if not self.patch_exists(lp):
+                                inst_addr = self.inst_tbl_ptr + lp * 12
+                                self.inst_head = rd_inst_head(1, inst_addr)
+                                if self.inst_head.channel & 0x80 == 0x80:
+                                    self.drm_head = rd_drmkit_head(1)
+                                    inst_ptr = self.drm_head.dct_tbl + pn * 12
+                                    inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                    self.inst_head = rd_inst_head(1, inst_addr)
+                                    self.dct_head = rd_dct_head(1)
+                                    nse_addr = inst_addr + 2
+                                    self.gb_head = rd_nse_head(1, nse_addr)
+                                    self.drmkits.add(s_lp)
+                                    dcts = self.drmkits[s_lp].directs
+                                    dcts.add(s_pn)
+                                    h = (
+                                        self.inst_head,
+                                        self.dct_head,
+                                        self.gb_head
+                                    )
+                                    dct_args = dcts, s_pn, *h
+                                    self.set_direct(*dct_args)
+                                    if dcts[s_pn].output in smp_out:
+                                        h = self.dct_head, self.gb_head
+                                        smp_args = dcts, s_pn, *h, True
+                                        self.get_smp(*smp_args)
+                                elif self.inst_head.channel & 0x40 == 0x40:
+                                    self.mul_head = rd_mul_head(1)
+                                    self.insts.add(s_lp)
+                                    kmaps = self.insts[s_lp].kmaps
+                                    k_addr = self.wfile.rd_byte()
+                                    kmaps.add(k_addr)
 
 
     def smp_exists(self, smp_id: int) -> bool:

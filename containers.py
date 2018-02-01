@@ -12,9 +12,9 @@ from fileio import File
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
            'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
-           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
-           'Sample', 'Subroutine')
+           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel',
+           'Direct', 'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note',
+           'NoteID', 'Sample', 'Subroutine')
 
 
 class ChannelTypes(Enum):
@@ -148,6 +148,12 @@ class Collection(deque, UserDict):
         out = deque.__getitem__(self, item)
         deque.__delitem__(self, item)
         self.data.pop(out)
+
+    def __getitem__(self, key: Union[str, int]) -> Any:
+        out = deque.__getitem__(self, item)
+        if out in self.data:
+            return self.data[out]
+        return out
 
     def __eq__(self, other: 'Container') -> bool:
         return deque.__eq__(self, other) and self.data == other.data
