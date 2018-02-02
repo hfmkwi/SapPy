@@ -616,7 +616,80 @@ class Decoder(object):
                                     kmaps = self.insts[s_lp].kmaps
                                     k_addr = self.wfile.rd_byte()
                                     kmaps.add(k_addr)
-
+                                    cdr = kmaps[s_pn].assign_dct
+                                    s_cdr = str(cdr)
+                                    inst_ptr = self.mul_head.dct_tbl + cdr * 12
+                                    inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                    self.inst_head = rd_inst_head(1, inst_addr)
+                                    self.dct_head = rd_dct_head(1)
+                                    nse_addr = inst_addr + 2
+                                    self.gb_head = rd_nse_head(1, nse_addr)
+                                    dcts = self.insts[s_lp].directs
+                                    dcts.add(s_cdr)
+                                    h = (
+                                        self.inst_head,
+                                        self.dct_head,
+                                        self.gb_head
+                                    )
+                                    dct_args = dcts, s_cdr, *h
+                                    self.set_direct(*dct_args)
+                                    if dcts[s_cdr].output in smp_out:
+                                        h = self.dct_head, self.smp_head
+                                        smp_args = dcts, s_cdr, *h, False
+                                        self.get_smp(*smp_args)
+                            else:
+                                inst_addr = self.inst_tbl_ptr + lp * 12
+                                self.inst_head = rd_inst_head(1, inst_addr)
+                                if self.inst_head.channel & 0x80 == 0x80:
+                                    self.drm_head = rd_drmkit_head(1)
+                                    inst_ptr = self.drm_head.dct_tbl + pn * 12
+                                    inst_addr = File.gba_ptr_to_addr(inst_ptr)
+                                    self.inst_head = rd_inst_head(1, inst_addr)
+                                    self.dct_head = rd_dct_head(1)
+                                    nse_addr = inst_addr = 2
+                                    self.gb_head = rd_nse_head(1, nse_addr)
+                                    dcts = self.drmkits[s_lp].directs
+                                    if not self.dct_exists(dcts, pn):
+                                        dcts.add(s_pn)
+                                        h = (
+                                            self.inst_head,
+                                            self.dct_head,
+                                            self.gb_head
+                                        )
+                                        dct_args = dcts, s_pn, *h
+                                        self.set_direct(*dct_args)
+                                        if dcts[s_pn].output in smp_out:
+                                            h = self.dct_head, self.smp_head
+                                            smp_args = dcts, s_pn, *h, False
+                                            self.get_smp(*smp_args)
+                                elif self.inst_head.channel & 0x40 == 0x40:
+                                    self.mul_head = rd_mul_head(1)
+                                    kmaps = self.insts[s_lp].kmaps
+                                    if not self.kmap_exists(kmaps, pn):
+                                        kmap_addr = self.mul_head.kmap
+                                        r_ptr = File.gba_ptr_to_addr(kmap_addr)
+                                        r_addr = r_ptr + pn
+                                        args = self.wfile.rd_byte(r_addr), s_pn
+                                        kmaps.add(*args)
+                                        cdr = kmaps[s_pn].assign_dct
+                                        s_cdr = str(cdr)
+                                        ptr = self.mul_head.dct_tbl + cdr * 12
+                                        i_addr = File.gba_ptr_to_addr(ptr)
+                                        args = 1, i_addr
+                                        self.inst_head = rd_inst_head(*args)
+                                        self.dct_head = rd_dct_head(1)
+                                        nse_addr = i_addr + 2
+                                        self.gb_head = rd_nse_head(1, nse_addr)
+                                        dcts = self.insts[s_lp].dcts
+                                        if not self.dct_exists(dcts, cdr):
+                                            dcts.add(s_cdr)
+                                            h = (
+                                                self.inst_head,
+                                                self.dct_head
+                                                self.gb_head
+                                            )
+                                            dct_args = dcts, s_cdr, *h
+                                            self.set_direct(*dct_args)
 
     def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
@@ -652,7 +725,7 @@ class Decoder(object):
 
 
 def main():
-    """Main method."""
+    """Main test method."""
     d = Decoder()
     d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x0008F2C8)
 
