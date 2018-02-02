@@ -12,9 +12,9 @@ from fileio import File
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
            'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel',
-           'Direct', 'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note',
-           'NoteID', 'Sample', 'Subroutine')
+           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
+           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
+           'Sample', 'Subroutine')
 
 
 class ChannelTypes(Enum):
@@ -137,9 +137,16 @@ class Collection(deque, UserDict):
 
     """
 
-    def __init__(self):
-        deque.__init__(self)
+    def __init__(self, *iterables):
         UserDict.__init__(self)
+        deque.__init__(self)
+        if iterables:
+            for iter in iterables:
+                if type(iter) == dict:
+                    for k in iter:
+                        self.key_append(k)
+                    continue
+                self.extend(iter)
 
     def __contains__(self, item: Any) -> bool:
         return deque.__contains__(self, item) or item in self.data
@@ -149,10 +156,12 @@ class Collection(deque, UserDict):
         deque.__delitem__(self, item)
         self.data.pop(out)
 
-    def __getitem__(self, key: Union[str, int]) -> Any:
-        out = deque.__getitem__(self, item)
+    def __getitem__(self, key: Any) -> Any:
+        if type(key) == str:
+            return self.data[key]
+        out = deque.__getitem__(self, key)
         if out in self.data:
-            return self.data[out]
+            out = self.__getitem__(out)
         return out
 
     def __eq__(self, other: 'Container') -> bool:
@@ -163,6 +172,21 @@ class Collection(deque, UserDict):
 
     def __ne__(self, other: 'Container') -> bool:
         return deque.__ne__(self, other) and self.data != other.data
+
+    def __setitem__(self, key: Union[str, int], item: Any) -> None:
+        if type(key) == str:
+            self.data[key] = item
+        elif type(key) == int:
+            out = self.__getitem__(key)
+            deque.__setitem__(self, key, item)
+            if out in self.data:
+                self.remove(out)
+
+    def __repr__(self):
+        return f'Container({self.data}, {tuple(self)})'
+
+    def __str__(self):
+        return str(tuple(self))
 
     def add(self, *args):
         """Abstract add method; add some container to a container queue"""
@@ -207,8 +231,8 @@ class Collection(deque, UserDict):
 class ChannelQueue(Collection):
     """LIFO container of sound channels."""
 
-    def add(self, key: str) -> None:
-        channel = Channel(key=key)
+    def add(self) -> None:
+        channel = Channel(key=None)
         self.append(channel)
 
 
@@ -232,10 +256,9 @@ class EventQueue(Collection):
     """LIFO container of internal events."""
 
     # yapf: disable
-    def add(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int,
-            key: str) -> None:
+    def add(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int
+           ) -> None:
         event = Event(
-            key      = key,
             ticks    = ticks,
             cmd_byte = cmd_byte,
             arg1     = arg1,
@@ -313,9 +336,9 @@ class SampleQueue(Collection):
 class SubroutineQueue(Collection):
     """LIFO container holding AGB subs."""
 
-    def add(self, evt_q_ptr: int, key: str) -> None:
-        subroutine = Subroutine(key=key, evt_q_ptr=evt_q_ptr)
-        self.key_append(subroutine, key)
+    def add(self, evt_q_ptr: int) -> None:
+        subroutine = Subroutine(key="", evt_q_ptr=evt_q_ptr)
+        self.append(subroutine)
 
 
 class Channel(NamedTuple):
@@ -342,7 +365,7 @@ class Channel(NamedTuple):
     vib_depth:    int             = int()
     vib_rate:     int             = int()
     key:          str             = str()
-    output:     ChannelTypes    = ChannelTypes.NULL
+    output:       ChannelTypes    = ChannelTypes.NULL
     evt_queue:    EventQueue      = EventQueue()
     notes:        NoteQueue       = NoteQueue()
     subs:         SubroutineQueue = SubroutineQueue()
@@ -367,7 +390,7 @@ class Direct(NamedTuple):
     drum_key:  int         = 0x3C
     key:       str         = str()
     smp_id:    str         = str()
-    output:  DirectTypes = DirectTypes.NULL
+    output:    int         = DirectTypes.NULL
     # yapf: enable
 
 

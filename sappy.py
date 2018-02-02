@@ -43,6 +43,7 @@ class Decoder(object):
     log = getLogger(name=__name__)
 
     def __init__(self):
+        # yapf: disable
         self.playing:      bool                        = bool()
         self.record:       bool                        = bool()
         self.inst_tbl_ptr: int                         = int()
@@ -76,6 +77,7 @@ class Decoder(object):
         self.last_evt:     RawMidiEvent                = RawMidiEvent()
         self.smp_head:     SampleHeader                = SampleHeader()
         self.smp_pool:     SampleQueue[Sample]         = SampleQueue()  # pylint:     disable = E1136
+        # yapf: enable
 
     @property
     def gbl_vol(self) -> int:
@@ -103,12 +105,13 @@ class Decoder(object):
         return int.from_bytes(val.to_bytes(2, 'big'), 'little')
 
     @staticmethod
-    def set_direct(queue: DirectQueue, dct_key: str, inst_head: InstrumentHeader,
-                   dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
-        """UKNOWN"""
+    def set_direct(queue: DirectQueue, dct_key: str,
+                   inst_head: InstrumentHeader, dct_head: DirectHeader,
+                   gb_head: NoiseHeader) -> None:
+        # """UKNOWN"""
         # yapf: disable
-        direct = queue.directs[dct_key]
-        queue.directs[dct_key] = Direct(
+        direct = queue[dct_key]
+        queue[dct_key] = direct._replace(
             drum_key  = inst_head.drum_pitch,
             output    = DirectTypes(inst_head.channel & 7),
             env_attn  = dct_head.attack,
@@ -123,8 +126,6 @@ class Decoder(object):
             gb4       = gb_head.b5,
             fix_pitch = (inst_head.channel & 0x08) == 0x08,
             reverse   = (inst_head.channel & 0x10) == 0x10,
-            smp_id    = direct.smp_id,
-            key       = direct.key
         )
         # yapf: enable
 
@@ -212,14 +213,12 @@ class Decoder(object):
                 smp_head: SampleHeader, use_readstr: bool) -> None:
         """UNKNOWN"""
         dct_q = q.directs
-        dct_q[dct_key] = dct_q[dct_key]._replace(
-            smp_id=dct_head.smp_head)
+        dct_q[dct_key] = dct_q[dct_key]._replace(smp_id=dct_head.smp_head)
         s_id = dct_q[dct_key].smp_id
         if not self.smp_exists(s_id):
             self.smp_pool.add(str(s_id))
             if dct_q[dct_key].output == DirectTypes.DIRECT:
-                self.smp_head = rd_smp_head(
-                    File.gba_ptr_to_addr(s_id))
+                self.smp_head = rd_smp_head(File.gba_ptr_to_addr(s_id))
                 if use_readstr:
                     smp_data = self.wfile.rd_str(smp_head.size)
                 else:
@@ -230,11 +229,9 @@ class Decoder(object):
                     loop_start=smp_head.loop,
                     loop=smp_head.flags > 0,
                     gb_wave=False,
-                    smp_data=smp_data
-                )
+                    smp_data=smp_data)
             else:
-                tsi = self.wfile.rd_str(
-                    16, File.gba_ptr_to_addr(s_id))
+                tsi = self.wfile.rd_str(16, File.gba_ptr_to_addr(s_id))
                 smp_data = []
                 for ai in range(32):
                     bi = ai % 2
@@ -243,7 +240,8 @@ class Decoder(object):
                         smp_pt = 0
                     else:
                         smp_pt = ord(newvariable73)
-                    smp_pt = chr(smp_pt // 16 ** bi % 16 * self.GB_WAV_BASE_FREQ*16)
+                    smp_pt = chr(
+                        smp_pt // 16**bi % 16 * self.GB_WAV_BASE_FREQ * 16)
                     smp_data.append(smp_pt)
                 smp_data = "".join(smp_data)
                 self.smp_pool[str(s_id)] = self.smp_pool[str(s_id)].replace(
@@ -252,8 +250,7 @@ class Decoder(object):
                     loop_start=0,
                     loop=True,
                     gb_wave=True,
-                    smp_data=smp_data
-                )
+                    smp_data=smp_data)
 
     get_mul_smp = get_smp
 
@@ -321,8 +318,7 @@ class Decoder(object):
             xta.clear()
             while True:
                 ctl_byte = self.wfile.rd_byte(pgm_ctr)
-                if ctl_byte >= 0x00 and ctl_byte <= 0xB0 or ctl_byte in (
-                        0xCE, 0xCF, 0xB4):
+                if 0x00 <= ctl_byte <= 0xB0 or ctl_byte in (0xCE, 0xCF, 0xB4):
                     pgm_ctr += 1
                 elif ctl_byte == 0xB9:
                     pgm_ctr += 4
@@ -355,15 +351,15 @@ class Decoder(object):
             trnps = 0
             channels = self.channels
             cur_ch = channels[i]._replace(track_ptr=-1)
-            input()
+            self.wfile.rd_addr = pgm_ctr
+            print("-- BEGIN WHATEVER THIS IS --")
             while True:
-                self.wfile.rd_addr = pgm_ctr
-                print(pgm_ctr)
                 chk_loop_addr = pgm_ctr >= loop_addr and loop_addr != -1
                 if chk_loop_addr and cur_ch.loop_ptr == -1:
                     loop_ptr = cur_ch.evt_queue.count + 1
                     channels[i] = cur_ch._replace(loop_ptr=loop_ptr)
                 ctl_byte = self.wfile.rd_byte()
+                print(hex(pgm_ctr), hex(ctl_byte))
                 chk_byte_rg = 0xb5 <= ctl_byte < 0xc5
                 if (chk_byte_rg and ctl_byte != 0xb9) or ctl_byte == 0xcd:
                     cmd_arg = self.wfile.rd_byte()
@@ -409,6 +405,7 @@ class Decoder(object):
                             channels[i].evt_queue.add(*e_args)
                             g = True
                         else:
+                            assert n_ctr < 66
                             lln[n_ctr] = cmd_arg
                             pgm_ctr += 1
                             e = self.wfile.rd_byte()
@@ -457,7 +454,7 @@ class Decoder(object):
                                     hd = self.dct_head, self.smp_head
                                     smp_args = drmkit, s_pn, *hd, False
                                     self.get_smp(*smp_args)
-                            elif self.inst_head.channel & 0x40 == 0x40: # Multi
+                            elif self.inst_head.channel & 0x40 == 0x40:  # Multi
                                 self.mul_head = rd_mul_head(1)
                                 self.insts.add(s_lp)
                                 kmaps = self.insts[s_lp].kmaps
@@ -484,7 +481,7 @@ class Decoder(object):
                                 if dcts[s_cdr].output in smp_out:
                                     h = self.dct_head, self.smp_head
                                     self.get_smp(dcts[s_cdr], *h, False)
-                            else: # Direct/GB Sample
+                            else:  # Direct/GB Sample
                                 self.dct_head = rd_dct_head(1)
                                 nse_addr = self.inst_tbl_ptr + lp * 12 + 2
                                 self.gb_head = rd_nse_head(1, nse_addr)
@@ -492,7 +489,7 @@ class Decoder(object):
                                 h = self.inst_head, self.dct_head, self.gb_head
                                 dct_args = self.directs, s_lp, *h
                                 self.set_direct(*dct_args)
-                        else: # Patch exists
+                        else:  # Patch exists
                             inst_addr = self.inst_tbl_ptr + lp * 12
                             self.inst_head = rd_inst_head(1, inst_addr)
                             if self.inst_head.channel & 0x80 == 0x80:
@@ -507,11 +504,8 @@ class Decoder(object):
                                 dcts = self.drmkits[s_lp].directs
                                 if not self.dct_exists(dcts, pn):
                                     dcts.add(s_pn)
-                                    h = (
-                                        self.inst_head,
-                                        self.dct_head,
-                                        self.gb_head
-                                    )
+                                    h = (self.inst_head, self.dct_head,
+                                         self.gb_head)
                                     dct_args = dcts, s_pn, *h
                                     self.set_direct(*dct_args)
                                     if dcts[s_pn].output in smp_out:
@@ -537,11 +531,8 @@ class Decoder(object):
                                     dcts = self.insts[s_lp].directs
                                     if not self.dct_exists(dcts, cdr):
                                         dcts.add(s_cdr)
-                                        h = (
-                                            self.inst_head,
-                                            self.dct_head,
-                                            self.gb_head
-                                        )
+                                        h = (self.inst_head, self.dct_head,
+                                             self.gb_head)
                                         dct_args = dcts, s_cdr, *h
                                         self.set_direct(*dct_args)
                                         if dcts[s_cdr].output in smp_out:
@@ -550,11 +541,11 @@ class Decoder(object):
                                             self.get_mul_smp(*m_args)
                 elif 0x00 <= ctl_byte < 0x80:
                     if ctrl < 0xCF:
-                        evt_q = self.channels[i].evt_q
-                        evt_q.add(cticks, ctrl, c, 0, 0)
+                        evt_q = self.channels[i].evt_queue
+                        evt_q.add(cticks, ctrl, ctl_byte, 0, 0)
                         pgm_ctr += 1
                     else:
-                        c = ctrl
+                        ctl_byte = ctrl
                         self.wfile.read_offset = pgm_ctr
                         g = False
                         n_ctr = 0
@@ -563,7 +554,10 @@ class Decoder(object):
                             if d >= 0x80:
                                 if not n_ctr:
                                     pn = lln[n_ctr] + trnps
-                                    evt_q.add(cticks, c, pn, llv[n_ctr], lla[n_ctr])
+                                    s_pn = str(pn)
+                                    l = llv[n_ctr], lla[n_ctr]
+                                    e_args = cticks, c, pn, *l
+                                    evt_q.add(*e_args)
                             else:
                                 lln[n_ctr] = d
                                 pgm_ctr += 1
@@ -584,7 +578,8 @@ class Decoder(object):
                                     f = lla[n_ctr]
                                     g = True
                                 pn = d + trnps
-                                evt_q.add(cticks, c, pn, e, f)
+                                s_pn = str(pn)
+                                evt_q.add(cticks, ctl_byte, pn, e, f)
                             if not self.patch_exists(lp):
                                 inst_addr = self.inst_tbl_ptr + lp * 12
                                 self.inst_head = rd_inst_head(1, inst_addr)
@@ -599,11 +594,8 @@ class Decoder(object):
                                     self.drmkits.add(s_lp)
                                     dcts = self.drmkits[s_lp].directs
                                     dcts.add(s_pn)
-                                    h = (
-                                        self.inst_head,
-                                        self.dct_head,
-                                        self.gb_head
-                                    )
+                                    h = (self.inst_head, self.dct_head,
+                                         self.gb_head)
                                     dct_args = dcts, s_pn, *h
                                     self.set_direct(*dct_args)
                                     if dcts[s_pn].output in smp_out:
@@ -626,11 +618,8 @@ class Decoder(object):
                                     self.gb_head = rd_nse_head(1, nse_addr)
                                     dcts = self.insts[s_lp].directs
                                     dcts.add(s_cdr)
-                                    h = (
-                                        self.inst_head,
-                                        self.dct_head,
-                                        self.gb_head
-                                    )
+                                    h = (self.inst_head, self.dct_head,
+                                         self.gb_head)
                                     dct_args = dcts, s_cdr, *h
                                     self.set_direct(*dct_args)
                                     if dcts[s_cdr].output in smp_out:
@@ -651,11 +640,8 @@ class Decoder(object):
                                     dcts = self.drmkits[s_lp].directs
                                     if not self.dct_exists(dcts, pn):
                                         dcts.add(s_pn)
-                                        h = (
-                                            self.inst_head,
-                                            self.dct_head,
-                                            self.gb_head
-                                        )
+                                        h = (self.inst_head, self.dct_head,
+                                             self.gb_head)
                                         dct_args = dcts, s_pn, *h
                                         self.set_direct(*dct_args)
                                         if dcts[s_pn].output in smp_out:
@@ -683,11 +669,8 @@ class Decoder(object):
                                         dcts = self.insts[s_lp].dcts
                                         if not self.dct_exists(dcts, cdr):
                                             dcts.add(s_cdr)
-                                            h = (
-                                                self.inst_head,
-                                                self.dct_head
-                                                self.gb_head
-                                            )
+                                            h = (self.inst_head, self.dct_head,
+                                                 self.gb_head)
                                             dct_args = dcts, s_cdr, *h
                                             self.set_direct(*dct_args)
 
@@ -721,7 +704,6 @@ class Decoder(object):
             self.log.debug('StopSong(): Length: %s, total ticks: %s', *dbg_vars)
             self.mfile.write_little_endian(unpack(self.flip_lng(trk_len), 0x13))
         # TODO: raise SONG_FINISH
-
 
 
 def main():
