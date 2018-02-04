@@ -18,6 +18,8 @@ from fmod import *
 from player import *
 
 kernal32 = ctypes.windll.kernal32
+
+
 class SongOutputTypes(Enum):
     """Possible outputs for each song."""
     NULL = 0
@@ -85,15 +87,15 @@ class Decoder(object):
         # yapf: enable
         self.ts = self.te = self.sz = int()
         random.seed()
-        if not sz:
-            sz = 2048
+        if not self.sz:
+            self.sz = 2048
         self.ts = kernal32.GetTickCount()
         for i in range(10):
-            for j in range(sz):
-                self.nse_wavs[0][i].append(chr(int(random.random()*153)))
+            for j in range(self.sz):
+                self.nse_wavs[0][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[0][i] = "".join(self.nse_wavs[0][i])
             for j in range(256):
-                self.nse_wavs[1][i].append(chr(int(random.random()*153)))
+                self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
         self.te = kernal32.GetTickCount()
         self.gbl_vol = 255
@@ -452,6 +454,7 @@ class Decoder(object):
                             self.inst_head = rd_inst_head(1, inst_ptr)
                             s_lp = str(lp)
                             s_pn = str(pn)
+                            s_cdr = str(cdr)
                             smp_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
                             if self.inst_head.channel & 0x80 == 0x80:
                                 self.drm_head = rd_drmkit_head(1)
@@ -576,7 +579,7 @@ class Decoder(object):
                                     pn = lln[n_ctr] + trnps
                                     s_pn = str(pn)
                                     l = llv[n_ctr], lla[n_ctr]
-                                    e_args = cticks, c, pn, *l
+                                    e_args = cticks, ctl_byte, pn, *l
                                     evt_q.add(*e_args)
                             else:
                                 lln[n_ctr] = d
@@ -761,9 +764,40 @@ class Decoder(object):
         for i in range(10):
             self.smp_pool.add(f'noise0{i}')
             sp = self.smp_pool
-            smp = self.smp_pool[i]
+            smp = sp[f'noise0{i}']
+            smp: Sample
             random.seed()
-            sp[i] = smp._replace(smp_data=self.)
+            with open_new_file(f'noise0{i}.raw', 2) as f:
+                f.wr_str(self.nse_wavs[0][i])
+            sp[i] = smp._replace(
+                freq=7040,
+                size=16384,
+                smp_data="",
+                fmod_smp=fmod.FSOUND_Sample_Load(
+                    csm.FSOUND_FREE, f'noise0{i}.raw',
+                    sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
+                    + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
+            fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 16383)
+            os.remove(f'noise0{i}.raw')
+            self.smp_pool.add(f'noise1{i}')
+            with open_new_file(f'noise1{i}.raw', 2) as f:
+                f.wr_str(self.nse_wavs[1][i])
+            sp[i] = smp._replace(
+                freq=7040,
+                size=256,
+                smp_data="",
+                fmod_smp=fmod.FSOUND_Sample_Load(
+                    csm.FSOUND_FREE, f'noise1{i}.raw',
+                    sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
+                    + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
+            fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 255)
+            os.remove(f'noise0{i}.raw')
+
+        for mx2 in range(4):
+            self.smp_pool.add(f'square{mx2}')
+            sp = self.smp_pool
+            smp = sp[f'square{mx2}']
+            sp[mx2] = smp._replace(smp_data=None)
 
     def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
