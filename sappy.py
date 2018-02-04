@@ -4,6 +4,9 @@
 # pylint: disable=W0401, W0511, W0614
 # TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
+import ctypes
+import os
+import random
 from enum import Enum
 from logging import INFO, basicConfig, getLogger
 from struct import unpack
@@ -11,9 +14,10 @@ from typing import List, NamedTuple
 
 from containers import *
 from fileio import *
+from fmod import *
 from player import *
 
-
+kernal32 = ctypes.windll.kernal32
 class SongOutputTypes(Enum):
     """Possible outputs for each song."""
     NULL = 0
@@ -71,6 +75,7 @@ class Decoder(object):
         self.inst_head:    InstrumentHeader            = InstrumentHeader()
         self.insts:        InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
         self.note_arr:     List[Note]                  = [Note()] * 32
+        self.nse_wavs:     List[List[str]]             = [[[str()]] * 10] * 2
         self.mul_head:     MultiHeader                 = MultiHeader()
         self.gb_head:      NoiseHeader                 = NoiseHeader()
         self.note_q:       NoteQueue[Note]             = NoteQueue()  # pylint:       disable = E1136
@@ -78,6 +83,20 @@ class Decoder(object):
         self.smp_head:     SampleHeader                = SampleHeader()
         self.smp_pool:     SampleQueue[Sample]         = SampleQueue()  # pylint:     disable = E1136
         # yapf: enable
+        self.ts = self.te = self.sz = int()
+        random.seed()
+        if not sz:
+            sz = 2048
+        self.ts = kernal32.GetTickCount()
+        for i in range(10):
+            for j in range(sz):
+                self.nse_wavs[0][i].append(chr(int(random.random()*153)))
+            self.nse_wavs[0][i] = "".join(self.nse_wavs[0][i])
+            for j in range(256):
+                self.nse_wavs[1][i].append(chr(int(random.random()*153)))
+            self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
+        self.te = kernal32.GetTickCount()
+        self.gbl_vol = 255
 
     @property
     def gbl_vol(self) -> int:
@@ -341,7 +360,7 @@ class Decoder(object):
 
             cticks = 0
             c_ei = 0
-            ctrl = 0xbe
+            lc = 0xbe
             lln: List = [None] * 66
             llv: List = [None] * 66
             lla: List = [None] * 66
@@ -352,7 +371,8 @@ class Decoder(object):
             channels = self.channels
             cur_ch = channels[i]._replace(track_ptr=-1)
             self.wfile.rd_addr = pgm_ctr
-            print("-- BEGIN WHATEVER THIS IS --")
+            print(f"-- READING CHANNEL {i} --")
+            evt_queue = channels[i].evt_queue
             while True:
                 chk_loop_addr = pgm_ctr >= loop_addr and loop_addr != -1
                 if chk_loop_addr and cur_ch.loop_ptr == -1:
@@ -368,17 +388,17 @@ class Decoder(object):
                     elif ctl_byte == 0xbd:
                         lp = cmd_arg
                     elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
-                        ctrl = ctl_byte
+                        lc = ctl_byte
                     e_args = (cticks, ctl_byte, cmd_arg, 0, 0)
-                    channels[i].evt_queue.add(*e_args)
+                    evt_queue.add(*e_args)
                 elif 0xc4 < ctl_byte < 0xcf:
-                    channels[i].evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+                    evt_queue.add(cticks, ctl_byte, 0, 0, 0)
                 elif ctl_byte == 0xb9:
                     cmd_arg = self.wfile.rd_byte()
                     e = self.wfile.rd_byte()
-                    f = self.wfile.rd_byte()
-                    e_args = cticks, ctl_byte, cmd_arg, e, f
-                    channels[i].evt_queue.add(*e_args)
+                    sm = self.wfile.rd_byte()
+                    e_args = cticks, ctl_byte, cmd_arg, e, sm
+                    evt_queue.add(*e_args)
                     pgm_ctr += 4
                 elif ctl_byte == 0xb4:
                     if insub == 1:
@@ -392,7 +412,7 @@ class Decoder(object):
                     pgm_ctr = self.wfile.rd_gba_ptr()
                 elif 0xcf <= ctl_byte <= 0xff:
                     pgm_ctr += 1
-                    ctrl = ctl_byte
+                    lc = ctl_byte
                     g = False
                     n_ctr = 0
                     while not g:
@@ -402,7 +422,7 @@ class Decoder(object):
                                 pn = lln[n_ctr] + trnps
                             l_args = llv[n_ctr], lla[n_ctr]
                             e_args = cticks, ctl_byte, pn, *l_args
-                            channels[i].evt_queue.add(*e_args)
+                            evt_queue.add(*e_args)
                             g = True
                         else:
                             assert n_ctr < 66
@@ -412,21 +432,21 @@ class Decoder(object):
                             if e < 0x80:
                                 llv[n_ctr] = e
                                 pgm_ctr += 1
-                                f = self.wfile.rd_byte()
-                                if f >= 0x80:
-                                    f = lla[n_ctr]
+                                sm = self.wfile.rd_byte()
+                                if sm >= 0x80:
+                                    sm = lla[n_ctr]
                                     g = True
                                 else:
-                                    lla[n_ctr] = f
+                                    lla[n_ctr] = sm
                                     pgm_ctr += 1
                                     n_ctr += 1
                             else:
                                 e = llv[n_ctr]
-                                f = lla[n_ctr]
+                                sm = lla[n_ctr]
                                 g = True
                             pn = cmd_arg + trnps
-                            e_args = cticks, ctl_byte, pn, e, f
-                            channels[i].evt_queue.add(*e_args)
+                            e_args = cticks, ctl_byte, pn, e, sm
+                            evt_queue.add(*e_args)
                         if not self.patch_exists(lp):
                             inst_ptr = self.inst_tbl_ptr + lp * 12
                             self.inst_head = rd_inst_head(1, inst_ptr)
@@ -540,12 +560,12 @@ class Decoder(object):
                                             m_args = dcts, s_cdr, *h, False
                                             self.get_mul_smp(*m_args)
                 elif 0x00 <= ctl_byte < 0x80:
-                    if ctrl < 0xCF:
+                    if lc < 0xCF:
                         evt_q = self.channels[i].evt_queue
-                        evt_q.add(cticks, ctrl, ctl_byte, 0, 0)
+                        evt_q.add(cticks, lc, ctl_byte, 0, 0)
                         pgm_ctr += 1
                     else:
-                        ctl_byte = ctrl
+                        ctl_byte = lc
                         self.wfile.read_offset = pgm_ctr
                         g = False
                         n_ctr = 0
@@ -565,21 +585,21 @@ class Decoder(object):
                                 if e < 0x80:
                                     llv[n_ctr] = e
                                     pgm_ctr += 1
-                                    f = self.wfile.rd_byte()
-                                    if f >= 0x80:
-                                        f = lla[n_ctr]
+                                    sm = self.wfile.rd_byte()
+                                    if sm >= 0x80:
+                                        sm = lla[n_ctr]
                                         g = True
                                     else:
-                                        lla[n_ctr] = f
+                                        lla[n_ctr] = sm
                                         pgm_ctr += 1
                                         n_ctr += 1
                                 else:
                                     e = llv[n_ctr]
-                                    f = lla[n_ctr]
+                                    sm = lla[n_ctr]
                                     g = True
                                 pn = d + trnps
                                 s_pn = str(pn)
-                                evt_q.add(cticks, ctl_byte, pn, e, f)
+                                evt_q.add(cticks, ctl_byte, pn, e, sm)
                             if not self.patch_exists(lp):
                                 inst_addr = self.inst_tbl_ptr + lp * 12
                                 self.inst_head = rd_inst_head(1, inst_addr)
@@ -673,6 +693,77 @@ class Decoder(object):
                                                  self.gb_head)
                                             dct_args = dcts, s_cdr, *h
                                             self.set_direct(*dct_args)
+                                            if dcts[s_cdr].output in smp_out:
+                                                h = self.dct_head, self.smp_head
+                                                args = dcts, s_cdr, *h, False
+                                                self.get_mul_smp(*args)
+                elif 0x80 <= ctl_byte <= 0xB0:
+                    evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+                    cticks += stlen_to_ticks(ctl_byte - 0x80)
+                    pgm_ctr += 1
+                if ctl_byte in (0xB1, 0xB2):
+                    break
+            evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+
+        fmod.FSOUND_Init(44100, 64, 0)
+        fmod.FSOUND_SetSFXMasterVolume(self.gbl_vol)
+
+        quark = 0
+        csm = FSoundChannelSampleMode
+        sm = FSoundModes
+        for i in self.smp_pool:
+            smp = self.smp_pool[i]
+            quark += 1
+            smp: Sample
+            if smp.gb_wave:
+                if not int(smp.smp_data):
+                    with open_new_file('temp.raw', 2) as f:
+                        f.wr_str(smp.smp_data)
+
+                    args = (csm.FSOUND_FREE, 'temp.raw', sm.FSOUND_8BITS +
+                            sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL +
+                            sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0)
+                    fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
+                    fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
+                    os.remove('temp.raw')
+                else:
+                    args = (csm.FSOUND_FREE, fpath, sm.FSOUND_8BITS +
+                            sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL +
+                            sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, smp.smp_data,
+                            smp.size)
+                    fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
+                    fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
+            else:
+                if not int(smp.smp_data):
+                    with open_new_file('temp.raw', 2) as f:
+                        f.wr_str(smp.smp_data)
+                    args = (csm.FSOUND_FREE, 'temp.raw',
+                            sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
+                            (sm.FSOUND_LOOP_NORMAL if smp.loop else 0) +
+                            sm.FSOUND_MONO + sm.FSOUND_SIGNED, 0, 0)
+                    fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
+                    fmod.FSOUND_Sample_SetLoopPoints(
+                        smp.fmod_smp, smp.loop_start, smp.size - 1)
+                    os.remove('temp.raw')
+                else:
+                    args = (csm.FSOUND_FREE, fpath,
+                            sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
+                            (sm.FSOUND_LOOP_NORMAL
+                             if smp.loop else 0) + sm.FSOUND_MONO +
+                            sm.FSOUND_SIGNED, smp.smp_data, smp.size)
+                    fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
+                    fmod.FSOUND_Sample_SetLoopPoints(
+                        smp.fmod_smp, smp.loop_start, smp.size - 1)
+        for i in range(10):
+            self.smp_pool.add(f'noise0{i}')
+            sp = self.smp_pool
+            smp = self.smp_pool[i]
+            random.seed()
+            sp[i] = smp._replace(smp_data=self.)
 
     def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
