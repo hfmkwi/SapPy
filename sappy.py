@@ -45,7 +45,10 @@ class Decoder(object):
     GB_NSE_MULTI = 0.5
     SAPPY_PPQN = 24
 
-    basicConfig(level=INFO)
+    if DEBUG:
+        basicConfig(level=INFO)
+    else:
+        basicConfig(level=NONE)
     log = getLogger(name=__name__)
 
     def __init__(self):
