@@ -3,7 +3,7 @@
 # pylint: disable=C0103,C0123,C0326,E1120,R0901,R0903,R0913,R0914,W0221,W0622
 """Data-storage containers for internal use."""
 from collections import deque, UserDict
-from enum import Enum
+from enum import IntEnum
 from typing import (Any, ItemsView, KeysView, MutableSequence, NamedTuple,
                     Union, ValuesView)
 
@@ -17,7 +17,7 @@ __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Sample', 'Subroutine')
 
 
-class ChannelTypes(Enum):
+class ChannelTypes(IntEnum):
     """Possible output types for each sound channel"""
     # yapf: disable
     DIRECT  = 0
@@ -34,7 +34,7 @@ class ChannelTypes(Enum):
     # yapf: enable
 
 
-class DirectTypes(Enum):
+class DirectTypes(IntEnum):
     """Possible outputs for DirectSound note."""
     # yapf: disable
     DIRECT  = 0
@@ -49,7 +49,7 @@ class DirectTypes(Enum):
     # yapf: enable
 
 
-class NoteTypes(Enum):
+class NoteTypes(IntEnum):
     """Declare possible outputs for the Note object"""
     # yapf: disable
     DIRECT  = 0
@@ -64,7 +64,7 @@ class NoteTypes(Enum):
     # yapf: enable
 
 
-class NotePhases(Enum):
+class NotePhases(IntEnum):
     """Declare possible phases for the Note object"""
     # yapf: disable
     INITIAL = 0
@@ -289,7 +289,7 @@ class NoteQueue(Collection):
     """LIFO container of AGB notes."""
 
     # yapf: disable
-    def add(self, enable: bool, fmod_channel: int, note_num: int,
+    def add(self, enable: bool, fmod_channel: int, smp_id: int,
             freq: int, velocity: int, parent: int, unk_val: int,
             output: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
             env_rel: int, wait_ticks: int, patch_num: int,
@@ -299,7 +299,7 @@ class NoteQueue(Collection):
             key          = key,
             enable       = enable,
             fmod_channel = fmod_channel,
-            note_num     = note_num,
+            note_id      = smp_id,
             freq         = freq,
             velocity     = velocity,
             patch_num    = patch_num,
@@ -446,7 +446,7 @@ class Note(NamedTuple):
     env_sus:      int        = int()
     fmod_channel: int        = int()
     freq:         int        = int()
-    note_num:     int        = int()
+    note_id:       int        = int()
     parent:       int        = int()
     patch_num:    int        = int()
     unk_val:      int        = int()

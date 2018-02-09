@@ -1,0 +1,16 @@
+<RCC>
+  <qresource prefix="icons">
+    <file>H:/Merci/Downloads/famfamfam_silk_icons_v013/icons/bullet_red.png</file>
+    <file>H:/Merci/Downloads/famfamfam_silk_icons_v013/icons/door_out.png</file>
+    <file>H:/Merci/Downloads/famfamfam_silk_icons_v013/icons/folder.png</file>
+    <file>icons/PNG/player/033.png</file>
+    <file>icons/PNG/player/029.png</file>
+    <file>icons/PNG/player/035.png</file>
+    <file>icons/PNG/player/036.png</file>
+    <file>icons/PNG/player/038.png</file>
+    <file>icons/PNG/player/044.png</file>
+    <file>sappy.ico</file>
+    <file>icons/PNG/player/041.png</file>
+    <file>icons/PNG/player/042.png</file>
+  </qresource>
+</RCC>

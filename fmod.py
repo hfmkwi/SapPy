@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 """API for FMOD. (Direct clone from original source)"""
 from ctypes import windll
-from enum import Enum, auto
+from enum import IntEnum, auto
 from typing import NamedTuple, List
 
 __all__ = ('fmod', 'FModErrors', 'FSoundOutputTypes', 'FSoundMixerTypes',
@@ -19,7 +19,7 @@ FMOD_VERSION = 3.74
 fmod = windll.fmod
 
 
-class FModErrors(Enum):
+class FModErrors(IntEnum):
     # yapf: disable
     FMOD_ERR_NONE           = 0
     FMOD_ERR_BUSY           = auto()
@@ -43,7 +43,7 @@ class FModErrors(Enum):
 # yapf: enable
 
 
-class FSoundOutputTypes(Enum):
+class FSoundOutputTypes(IntEnum):
     # yapf: disable
     FSOUND_OUTPUT_NOSOUND = 0
     FSOUND_OUTPUT_WINMM   = auto()
@@ -58,7 +58,7 @@ class FSoundOutputTypes(Enum):
 # yapf: enable
 
 
-class FSoundMixerTypes(Enum):
+class FSoundMixerTypes(IntEnum):
     # yapf: disable
     FSOUND_MIXER_AUTODETECT         = 0
     FSOUND_MIXER_QUALITY_AUTODETECT = auto()
@@ -66,7 +66,7 @@ class FSoundMixerTypes(Enum):
 # yapf: enable
 
 
-class FMusicTypes(Enum):
+class FMusicTypes(IntEnum):
     FMUSIC_TYPE_NON = 0
     FMUSIC_TYPE_MOD = auto()
     FMUSIC_TYPE_S3M = auto()
@@ -76,7 +76,7 @@ class FMusicTypes(Enum):
     FMUSIC_TYPE_FSB = auto()
 
 
-class FSoundDSPProperties(Enum):
+class FSoundDSPProperties(IntEnum):
     # yapf: disable
     FSOUND_DSP_DEFAULTPRI_CLEARUNIT = 0
     FSOUND_DSP_DEFAULTPRI_SFXUNIT   = 100
@@ -87,13 +87,13 @@ class FSoundDSPProperties(Enum):
 # yapf: enable
 
 
-class FSoundCaps(Enum):
+class FSoundCaps(IntEnum):
     FSOUND_CAPS_HARDWARE = 0x01
     FSOUND_CAPS_EAX2 = 0x02
     FSOUND_CAPS_EAX3 = 0x10
 
 
-class FSoundModes(Enum):
+class FSoundModes(IntEnum):
     # yapf: disable
     FSOUND_LOOP_OFF      = 0x1
     FSOUND_LOOP_NORMAL   = 0x2
@@ -130,14 +130,14 @@ class FSoundModes(Enum):
 # yapf: enable
 
 
-class FSoundCDPlayModes(Enum):
+class FSoundCDPlayModes(IntEnum):
     FSOUND_CD_PLAYCONTINUOUS = 0
     FSOUND_CD_PLAYONCE = auto()
     FSOUND_CD_PLAYLOOPED = auto()
     FSOUND_CD_PLAYRANDOM = auto()
 
 
-class FSoundChannelSampleMode(Enum):
+class FSoundChannelSampleMode(IntEnum):
     FSOUND_FREE = -1
     FSOUND_UNMANAGED = -2
     FSOUND_ALL = -3
@@ -175,7 +175,7 @@ class FSoundReverbProperties(NamedTuple):
     flags: int
 
 
-class FSoundReverbPropertyFlags(Enum):
+class FSoundReverbPropertyFlags(IntEnum):
     FSOUND_REVERBFLAGS_DECAYTIMESCALE = 0x01
     FSOUND_REVERBFLAGS_REFLECTIONSSCALE = 0x02
     FSOUND_REVERBFLAGS_REFLECTIONDELAYSCALE = 0x04
@@ -210,14 +210,14 @@ class FSoundReverbChannelProperties(NamedTuple):
     flags: int
 
 
-class FSoundReverbChannelFlags(Enum):
+class FSoundReverbChannelFlags(IntEnum):
     FSOUND_REVERB_CHANNELFLAGS_DIRECTHFAUTO = 0x1
     FSOUND_REVERB_CHANNELFLAGS_ROOMAUTO = 0x2
     FSOUND_REVERB_CHANNELFLAGS_ROOMHFAUTO = 0x4
     FSOUND_REVERB_CHANNELFLAGS_DEFAULT = FSOUND_REVERB_CHANNELFLAGS_DIRECTHFAUTO | FSOUND_REVERB_CHANNELFLAGS_ROOMAUTO | FSOUND_REVERB_CHANNELFLAGS_ROOMHFAUTO
 
 
-class FSoundFXModes(Enum):
+class FSoundFXModes(IntEnum):
     FSOUND_FX_CHORUS = 0
     FSOUND_FX_COMPRESSOR = auto()
     FSOUND_FX_DISTORTION = auto()
@@ -229,7 +229,7 @@ class FSoundFXModes(Enum):
     FSOUND_FX_WAVES_REVERB = auto()
 
 
-class FSoundSpeakerModes(Enum):
+class FSoundSpeakerModes(IntEnum):
     FSOUND_SPEAKERMODE_DOLBYDIGITAL = 0
     FSOUND_SPEAKERMODE_HEADPHONE = auto()
     FSOUND_SPEAKERMODE_MONO = auto()
@@ -240,7 +240,7 @@ class FSoundSpeakerModes(Enum):
     FSOUND_SPEAKERMODE_PROLOGIC2 = auto()
 
 
-class FSoundInitModes(Enum):
+class FSoundInitModes(IntEnum):
     FSOUND_INIT_USEDEFAULTMIDISYNTH = 0x1
     FSOUND_INIT_GLOBALFOCUS = 0x2
     FSOUND_INIT_ENABLESYSTEMCHANNELFX = 0x4
@@ -253,7 +253,7 @@ class FSoundInitModes(Enum):
     FSOUND_INIT_STREAM_FROM_MAIN_THREAD = 0x200
 
 
-class FSoundStreamNetStatus(Enum):
+class FSoundStreamNetStatus(IntEnum):
     FSOUND_STREAM_NET_NOTCONNECTED = 0
     FSOUND_STREAM_NET_CONNECTING = auto()
     FSOUND_STREAM_NET_BUFFERING = auto()
@@ -261,7 +261,7 @@ class FSoundStreamNetStatus(Enum):
     FSOUND_STREAM_NET_ERROR = auto()
 
 
-class FSoundTagFieldType(Enum):
+class FSoundTagFieldType(IntEnum):
     FSOUND_TAGFIELD_VORBISCOMMENT = 0
     FSOUND_TAGFIELD_ID3V1 = auto()
     FSOUND_TAGFIELD_ID3V2 = auto()
@@ -270,7 +270,7 @@ class FSoundTagFieldType(Enum):
     FSOUND_TAGFIELD_ASF = auto()
 
 
-class FSoundStatusFlags(Enum):
+class FSoundStatusFlags(IntEnum):
     FSOUND_PROTOCOL_SHOUTCAST = 0x1
     FSOUND_PROTOCOL_ICECAST = 0x2
     FSOUND_PROTOCOL_HTTP = 0x4

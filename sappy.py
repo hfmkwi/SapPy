@@ -1,13 +1,13 @@
 #!/usr/bin/python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0103, C0326, E1120, R0902, R0903, R0904, R0912, R0913, R0914, R0915, R1702
-# pylint: disable=W0401, W0511, W0614
+# pylint disable=C0103, C0326, E1120, R0902, R0903, R0904, R0912, R0913, R0914, R0915, R1702
+# pylint: disable=W0614
 # TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
 import ctypes
 import os
 import random
-from enum import Enum
+from enum import IntEnum
 from logging import INFO, basicConfig, getLogger
 from struct import unpack
 from typing import List, NamedTuple
@@ -17,10 +17,10 @@ from fileio import *
 from fmod import *
 from player import *
 
-kernal32 = ctypes.windll.kernal32
+kernal32 = ctypes.windll.kernel32
 
 
-class SongOutputTypes(Enum):
+class SongOutputTypes(IntEnum):
     """Possible outputs for each song."""
     NULL = 0
     WAVE = 1
@@ -48,18 +48,26 @@ class Decoder(object):
     if DEBUG:
         basicConfig(level=INFO)
     else:
-        basicConfig(level=NONE)
+        basicConfig(level=None)
     log = getLogger(name=__name__)
 
     def __init__(self):
         # yapf: disable
         self.playing:      bool                        = bool()
         self.record:       bool                        = bool()
+        self.beats:        int                         = int()
+        self.gb1_chan:     int                         = 255
+        self.gb2_chan:     int                         = 255
+        self.gb3_chan:     int                         = 255
+        self.gb4_chan:     int                         = 255
+        self.incr:         int                         = int()
         self.inst_tbl_ptr: int                         = int()
+        self.last_tempo:   int                         = int()
         self.layer:        int                         = int()
         self.sng_lst_ptr:  int                         = int()
         self.sng_num:      int                         = int()
         self.sng_ptr:      int                         = int()
+        self.tempo:        int                         = int()
         self.ttl_ticks:    int                         = int()
         self.ttl_msecs:    int                         = int()
         self._gbl_vol:     int                         = 100
@@ -72,6 +80,7 @@ class Decoder(object):
         self.fpath:        str                         = str()
         self.mfile:        File                        = None
         self.wfile:        File                        = None
+        self.output:       SongOutputTypes             = SongOutputTypes.NULL
         self.channels:     ChannelQueue[Channel]       = ChannelQueue()  # pylint:    disable = E1136
         self.dct_head:     DirectHeader                = DirectHeader()
         self.directs:      DirectQueue[Direct]         = DirectQueue()  # pylint:     disable = E1136
@@ -80,7 +89,7 @@ class Decoder(object):
         self.inst_head:    InstrumentHeader            = InstrumentHeader()
         self.insts:        InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
         self.note_arr:     List[Note]                  = [Note()] * 32
-        self.nse_wavs:     List[List[str]]             = [[[str()]] * 10] * 2
+        self.nse_wavs:     List[List[str]]             = [[[] for i in range(10)] for i in range(2)]
         self.mul_head:     MultiHeader                 = MultiHeader()
         self.gb_head:      NoiseHeader                 = NoiseHeader()
         self.note_q:       NoteQueue[Note]             = NoteQueue()  # pylint:       disable = E1136
@@ -94,12 +103,13 @@ class Decoder(object):
             self.sz = 2048
         self.ts = kernal32.GetTickCount()
         for i in range(10):
-            for j in range(self.sz):
+            for _ in range(self.sz):
                 self.nse_wavs[0][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[0][i] = "".join(self.nse_wavs[0][i])
-            for j in range(256):
+            for _ in range(256):
                 self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
+            print(self.nse_wavs[1][i])
         self.te = kernal32.GetTickCount()
         self.gbl_vol = 255
 
@@ -194,27 +204,6 @@ class Decoder(object):
         """Check if a drumkit on the specified MIDI patch exists."""
         return str(patch) in self.drmkits
 
-    def evt_processor_timer(self, msec: int) -> bool:
-        """UKNOWN"""
-        self.ttl_msecs += msec
-        if self.tick_ctr:
-            for i in range(32):
-                note = self.note_arr[i]
-                note: Note
-                if note.enable and note.wait_ticks > 0:
-                    w_ticks = note.wait_ticks - (self.tick_ctr - self.prv_tick)
-                    self.note_arr[i] = note._replace(wait_ticks=w_ticks)
-                if note.wait_ticks <= 0 and note.enable and not note.note_off:
-                    if not self.channels[note.parent].sustain:
-                        self.note_arr[i] = note._replace(note_off=True)
-            for i in range(len(self.channels)):
-                if not self.channels[i].enable:
-                    continue
-                channel = self.channels[i]
-                for ep in self.rip_ears:
-                    if ep == channel.patch_num:
-                        self.channels[i] = channel._replace(mute=True)
-
     def free_note(self) -> int:
         """Get a free note number.
 
@@ -237,8 +226,8 @@ class Decoder(object):
                 smp_head: SampleHeader, use_readstr: bool) -> None:
         """UNKNOWN"""
         dct_q = q.directs
-        dct_q[dct_key] = dct_q[dct_key]._replace(smp_id=dct_head.smp_head)
-        s_id = dct_q[dct_key].smp_id
+        dct_q[dct_key] = dct_q[dct_key]._replace(note_id=dct_head.smp_head)
+        s_id = dct_q[dct_key].note_id
         if not self.smp_exists(s_id):
             self.smp_pool.add(str(s_id))
             if dct_q[dct_key].output == DirectTypes.DIRECT:
@@ -326,6 +315,7 @@ class Decoder(object):
             self.note_arr[i] = Note(enable=False)
 
         self.wfile = open_file(self.fpath, 1)
+        assert self.wfile is not None
         ptr = self.wfile.rd_gba_ptr(self.sng_lst_ptr + sng_num * 8)
         self.sng_ptr = ptr
         self.layer = self.wfile.rd_ltendian(4)
@@ -364,17 +354,16 @@ class Decoder(object):
                     break
 
             cticks = 0
-            c_ei = 0
             lc = 0xbe
             lln: List = [None] * 66
             llv: List = [None] * 66
             lla: List = [None] * 66
             lp = 0
-            src2 = 1
             insub = 0
             trnps = 0
             channels = self.channels
             cur_ch = channels[i]._replace(track_ptr=-1)
+            cdr = 0
             self.wfile.rd_addr = pgm_ctr
             print(f"-- READING CHANNEL {i} --")
             evt_queue = channels[i].evt_queue
@@ -408,12 +397,12 @@ class Decoder(object):
                 elif ctl_byte == 0xb4:
                     if insub == 1:
                         pgm_ctr = rpc  # pylint: disable=E0601
-                        in_sub = 0
+                        insub = 0
                     else:
                         pgm_ctr += 1
                 elif ctl_byte == 0xb3:
                     rpc = pgm_ctr + 5
-                    in_sub = 1
+                    insub = 1
                     pgm_ctr = self.wfile.rd_gba_ptr()
                 elif 0xcf <= ctl_byte <= 0xff:
                     pgm_ctr += 1
@@ -495,7 +484,7 @@ class Decoder(object):
                                 inst_ptr = self.mul_head.dct_tbl + cdr * 12
                                 inst_addr = File.gba_ptr_to_addr(inst_ptr)
                                 self.inst_head = rd_inst_head(1, inst_addr)
-                                dct_head = rd_dct_head(1)
+                                self.dct_head = rd_dct_head(1)
                                 nse_ptr = inst_ptr + 2
                                 nse_addr = File.gba_ptr_to_addr(nse_ptr)
                                 self.gb_head = rd_nse_head(1, nse_addr)
@@ -506,7 +495,7 @@ class Decoder(object):
                                 self.set_direct(*dct_args)
                                 if dcts[s_cdr].output in smp_out:
                                     h = self.dct_head, self.smp_head
-                                    self.get_smp(dcts[s_cdr], *h, False)
+                                    self.get_smp(dcts, s_cdr, *h, False)
                             else:  # Direct/GB Sample
                                 self.dct_head = rd_dct_head(1)
                                 nse_addr = self.inst_tbl_ptr + lp * 12 + 2
@@ -794,17 +783,47 @@ class Decoder(object):
                     sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
                     + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
             fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 255)
-            os.remove(f'noise0{i}.raw')
+            os.remove(f'noise1{i}.raw')
 
+        b1 = chr(int(0x80 + 0x7F * self.GB_SQ_MULTI))
+        b2 = chr(int(0x80 - 0x7F * self.GB_SQ_MULTI))
         for mx2 in range(4):
             self.smp_pool.add(f'square{mx2}')
             sp = self.smp_pool
             smp = sp[f'square{mx2}']
-            sp[mx2] = smp._replace(smp_data=None)
 
-    def smp_exists(self, smp_id: int) -> bool:
+            if mx2 == 3:
+                sd = "".join([b1] * 24 + [b2] * 8)
+            else:
+                sd = "".join([b1] * ((mx2 + 2)**2) + [b2] * (32 - (mx2 + 2)**2))
+            with open_new_file(f'square{mx2}.raw', 2) as f:
+                f.wr_str(sd)
+            sp[mx2] = smp._replace(
+                smp_data='',
+                freq=7040,
+                fmod_smp=fmod.FSOUND_Sample_Load(
+                    csm.FSOUND_FREE, f'square{mx2}.raw',
+                    sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
+                    + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
+            os.remove(f'square{mx2}.raw')
+        self.gb1_chan = 255
+        self.gb2_chan = 255
+        self.gb3_chan = 255
+        self.gb4_chan = 255
+
+        self.tempo = 120
+        self.last_tempo = -1
+        self.incr = 0
+        self.wfile.close()
+        self.ttl_ticks = 0
+        self.ttl_msecs = 0
+        self.beats = 0
+
+        print('Done')
+
+    def smp_exists(self, note_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
-        return str(smp_id) in self.smp_pool
+        return str(note_id) in self.smp_pool
 
     def set_mpatch_map(self, ind: int, inst: int, transpose: int) -> None:
         """Bind a MIDI instrument to a specified MIDI key."""
@@ -818,9 +837,9 @@ class Decoder(object):
     def stop_song(self):
         """Stop playing a song."""
         File.from_id(1).close()
-        File.from_id(2).close()
+        # File.from_id(2).close()
         # TODO: disable event processor
-        # TODO: close sound channel
+        fmod.FSOUND_Close()
         # TODO: close MIDI channel
         if self.record:
             self.log.debug('test')
@@ -832,6 +851,230 @@ class Decoder(object):
             self.log.debug('StopSong(): Length: %s, total ticks: %s', *dbg_vars)
             self.mfile.write_little_endian(unpack(self.flip_lng(trk_len), 0x13))
         # TODO: raise SONG_FINISH
+
+    def evt_processor_timer(self, msecs: int) -> None:
+        ep = 0
+        mutethis = False
+        self.ttl_msecs += msecs
+        if self.tick_ctr > 0:
+            n_r = self.note_arr
+            for i in range(32):
+                n: Note = self.note_arr[i]
+                if n.enable and n.wait_ticks > 0:
+                    wt = n.wait_ticks - (self.tick_ctr - self.prv_tick)
+                    n_r[i] = n._replace(wait_ticks=wt)
+                if n.wait_ticks <= 0 and n.enable and not n.note_off:
+                    if not self.channels[n.parent].sustain:
+                        n_r[i] = n._replace(note_off=True)
+            for i in range(1, self.channels.count + 1):
+                if not self.channels[i].enabled:
+                    continue
+
+                c: Channel = self.channels[i]
+                for ep in range(len(self.rip_ears) + 1):
+                    if self.rip_ears[ep] == c.patch_num:
+                        self.channels[i] = c._replace(mute=True)
+
+                if c.wait_ticks > 0:
+                    wt = c.wait_ticks - (self.tick_ctr - self.prv_tick)
+                    self.channels[i]._replace(wait_tick=wt)
+
+                oo = False
+                OP = False
+                o = True
+
+                ch = self.channels
+
+                while True:
+                    cb = c.evt_queue[c.pgm_ctr].cmd_byte
+                    if cb == 0xB1:
+                        ch[i] = c._replace(enable=False)
+                        o = False
+                        break
+                    elif cb == 0xB9:
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1)
+                    elif cb == 0xBB:
+                        self.tempo = c.evt_queue[c.pgm_ctr].arg1 * 2
+                        if self.record:
+                            ec = chr(0xFF) + chr(0x51)
+                            self.buffer_evt(ec, self.ttl_ticks)
+                            w = ((60000000 / self.tempo) & 0xFFFFFF) | 0x3000000
+                            w = self.flip_lng(w)
+                            self.mfile.wr_ltendian(w)
+                            ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1)
+                    elif cb == 0xBC:
+                        t = sbyte_to_int(c.evt_queue[c.pgm_ctr].arg1)
+                        ch[i] = c._replace(transpose=t, pgm_ctr=c.pgm_ctr + 1)
+                    elif cb == 0xBD:
+                        pn = c.evt_queue[c.pgm_ctr].arg1
+                        if self.dct_exists(self.directs, c.patch_num):
+                            ot = self.directs[str(c.patch_num)].output
+                        elif self.inst_exists(c.patch_num):
+                            ot = ChannelTypes.MUL_SMP
+                        elif self.drm_exists(c.patch_num):
+                            ot = ChannelTypes.DRUMKIT
+                        else:
+                            ot = ChannelTypes.NULL
+                        ch[i] = c._replace(
+                            patch_num=pn, output=ot, pgm_ctr=c.pgm_ctr + 1)
+                        # TODO: SelectMidiInstrument
+                        ec = chr(0xC0 + i) + chr(self.mpatch_map[c.patch_num])
+                        self.buffer_evt(ec, self.ttl_ticks)
+                    elif cb == 0xBE:
+                        v = c.evt_queue[c.pgm_ctr].arg1
+                        na = self.note_arr
+                        for note in c.notes:
+                            n: Note = na[note.note_id]
+                            if n.enable and n.parent == i:
+                                dav = n.velocity / 0x7F * v / 0x7F * int(
+                                    n.env_pos)
+                                if mutethis:
+                                    dav = 0
+                                if self.output == SongOutputTypes.WAVE:
+                                    d = dav * 0 if c.mute else 1
+                                    fmod.FSOUND_SetVolume(n.fmod_channel, d)
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, main_vol=v)
+                    elif cb == 0xBF:
+                        p = c.evt_queue[c.pgm_ctr].arg1
+                        na = self.note_arr
+                        for note in c.notes:
+                            n: Note = na[note.note_id]
+                            if n.enable and n.parent == i:
+                                fmod.FSOUND_SetPan(n.fmod_channel,
+                                                   c.panning * 2)
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, panning=p)
+                    elif cb == 0xC0:
+                        pb = c.evt_queue[c.pgm_ctr].arg1
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, pitch=pb)
+                        na = self.note_arr
+                        for note in c.notes:
+                            n: Note = na[note.note_id]
+                            if n.enabled and n.parent == i:
+                                f = n.freq * 2**(1 / 12)**((
+                                    c.pitch - 0x40) / 0x40 * c.pitch_range)
+                                fmod.FSOUND_SetFrequency(n.fmod_channel, f)
+                    elif cb == 0xC1:
+                        pbr = sbyte_to_int(c.evt_queue[c.pgm_ctr].arg1)
+                        ch[i] = c._replace(
+                            pgm_ctr=c.pgm_ctr + 1, pitch_range=pbr)
+                        na = self.note_arr
+                        for note in c.notes:
+                            n: Note = na[note.note_id]
+                            if n.enable and n.parent == i:
+                                f = n.freq * 2**(1 / 12)**((
+                                    c.pitch - 0x40) / 0x40 * c.pitch_range)
+                                fmod.FSOUND_SetFrequency(n.fmod_channel, f)
+                    elif cb == 0xC2:
+                        vd = c.evt_queue[c.pgm_ctr].arg1
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, vib_depth=vd)
+                    elif cb == 0xC4:
+                        vr = c.evt_queue[c.pgm_ctr].arg1
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, vib_rate=vr)
+                    elif cb == 0xCE:
+                        s = False
+                        na = self.note_arr
+                        for note in c.notes:
+                            n: Note = na[note.note_id]
+                            if n.enabled and not n.note_off:
+                                na[note.note_id] = n._replace(note_off=True)
+                        ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, sustain=s)
+                    elif cb == 0xB3:
+                        sc = c.sub_ctr + 1
+                        rp = c.pgm_ctr + 1
+                        pc = c.subs[c.sub_ctr].evt_q_ptr
+                        i = True
+                        ch[i] = c._replace(
+                            pgm_ctr=pc, sub_ctr=sc, rtn_ptr=rp, in_sub=i)
+                    elif cb == 0xB4:
+                        if c.in_sub:
+                            pc = c.rtn_ptr
+                            i = False
+                        else:
+                            pc = c.pgm_ctr + 1
+                            i = c.in_sub
+                        ch[i] = c._replace(pgm_ctr=pc, in_sub=i)
+                    elif cb == 0xB2:
+                        looped = True
+                        i = False
+                        pc = c.loop_ptr
+                        ch[i] = c._replace(pgm_ctr=pc, in_sub=i)
+                    elif cb >= 0xCF:
+                        e = c.evt_queue[c.pgm_ctr]
+                        cb = e.cmd_byte
+                        ll = stlen_to_ticks(cb - 0xCF) + 1
+                        s = c.sustain
+                        if cb == 0xCF:
+                            s = True
+                            ll = 0
+                        nn = e.arg1
+                        vv = e.arg2
+                        uu = e.arg3
+                        self.note_q.add(True, 0, nn, 0, vv, i, uu, 0, 0, 0, 0,
+                                        0, ll, c.patch_num)
+                        pc = c.pgm_ctr + 1
+                        ch[i] = c._replace(pgm_ctr=pc, sustain=s)
+                    elif cb <= 0xB0:
+                        e = c.evt_queue[c.pgm_ctr]
+                        if looped:
+                            looped = False
+                            if i == 1:
+                                pass
+                            wt = 0
+                        else:
+                            pc = c.pgm_ctr + 1
+                            if pc > 1:
+                                wt = e.ticks - c.evt_queue[c.pgm_ctr - 1].ticks
+                            else:
+                                wt = e.ticks
+                    else:
+                        pc = c.pgm_ctr + 1
+                        ch[i] = c._replace(pgm_ctr=pc)
+                    oo = True
+                    if c.wait_ticks > 0:
+                        break
+                if not o:
+                    break
+            mmx = -1
+            if self.channels.count > 0:
+                clear_channel: List[bool] = [
+                    bool() for i in range(self.channels.count)
+                ]
+                for note in self.note_q:
+                    note: Note
+                    x = self.free_note()
+                    na = self.note_arr
+                    if x < 32:
+                        na[x] = note
+                        c2 = self.channels[note.parent]
+                        if not clear_channel[note.parent]:
+                            clear_channel[note.parent] = True
+                            for note2 in c2.notes:
+                                n: Note = na[note2.note_id]
+                                if n.enabled and not n.note_off:
+                                    na[note2.note_id] = n._replace(
+                                        note_off=True)
+                        c.notes.add(x, str(x))
+                        pat = note.patch_num
+                        nn = note.note_num
+
+                        if self.dct_exists(self.directs, pat):
+                            s_pat = str(pat)
+                            dct: Direct = self.directs[s_pat]
+                            ot = dct.output
+                            ea = dct.env_attn
+                            ed = dct.env_dec1
+                            es = dct.env_sus
+                            er = dct.env_rel
+                            if ot in (DirectTypes.DIRECT, DirectTypes.WAVE):
+                                das = str(dct.smp_id)
+                                s = self.smp_pool[das]
+                                daf = note_to_freq(nn + (60 - dct.drum_key), -1
+                                                   if s.gb_wave else s.freq)
+                                if s.gb_wave:
+                                    daf /= 2
+                            elif ot in (DirectTypes.SQUARE1,
+                                        DirectTypes.SQUARE2):
+                                pass
 
 
 def main():

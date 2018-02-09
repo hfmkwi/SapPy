@@ -60,6 +60,9 @@ class File(object):  # pylint: disable=R0902
         self._wr_addr = self._rd_addr = 0
 
     def __enter__(self):
+        self.wr_addr = 0
+        self.rd_addr = 0
+        self._file = open(self.path, 'rb+')
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -214,11 +217,10 @@ class File(object):  # pylint: disable=R0902
 
         """
         self.wr_addr = addr
-        self._file.seek(addr)
+        self._file.seek(self.wr_addr)
         data = struct.pack('B', data)
         self._file.write(data)
         self.wr_addr = self._file.tell()
-        assert self.wr_addr > addr or addr is not None
 
     def close(self, id: int = None) -> None:  # pylint: disable=W0622
         """Close the current file
