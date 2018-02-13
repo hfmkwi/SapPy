@@ -17,10 +17,11 @@ from fileio import *
 from fmod import *
 from player import *
 
-kernal32 = ctypes.windll.kernel32
+#kernal32 = ctypes.windll.kernel32
+fmod = ctypes.windll.fmod
 
 
-class SongOutputTypes(IntEnum):
+class SongTypes(IntEnum):
     """Possible outputs for each song."""
     NULL = 0
     WAVE = 1
@@ -70,7 +71,9 @@ class Decoder(object):
         self.tempo:        int                         = int()
         self.ttl_ticks:    int                         = int()
         self.ttl_msecs:    int                         = int()
+        self.transpose:    int                         = int()
         self._gbl_vol:     int                         = 100
+        self.note_f_ctr:   float                       = float()
         self.prv_tick:     float                       = float()
         self.tick_ctr:     float                       = float()
         self.rip_ears:     list                        = list()
@@ -80,7 +83,7 @@ class Decoder(object):
         self.fpath:        str                         = str()
         self.mfile:        File                        = None
         self.wfile:        File                        = None
-        self.output:       SongOutputTypes             = SongOutputTypes.NULL
+        self.output:       SongTypes             = SongTypes.NULL
         self.channels:     ChannelQueue[Channel]       = ChannelQueue()  # pylint:    disable = E1136
         self.dct_head:     DirectHeader                = DirectHeader()
         self.directs:      DirectQueue[Direct]         = DirectQueue()  # pylint:     disable = E1136
@@ -101,7 +104,7 @@ class Decoder(object):
         random.seed()
         if not self.sz:
             self.sz = 2048
-        self.ts = kernal32.GetTickCount()
+        self.ts = ctypes.windll.kernel32.GetTickCount()
         for i in range(10):
             for _ in range(self.sz):
                 self.nse_wavs[0][i].append(chr(int(random.random() * 153)))
@@ -110,7 +113,7 @@ class Decoder(object):
                 self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
             print(self.nse_wavs[1][i])
-        self.te = kernal32.GetTickCount()
+        self.te = ctypes.windll.kernel32.GetTickCount()
         self.gbl_vol = 255
 
     @property
@@ -230,6 +233,7 @@ class Decoder(object):
         s_id = dct_q[dct_key].note_id
         if not self.smp_exists(s_id):
             self.smp_pool.add(str(s_id))
+            print(self.smp_pool)
             if dct_q[dct_key].output == DirectTypes.DIRECT:
                 self.smp_head = rd_smp_head(File.gba_ptr_to_addr(s_id))
                 if use_readstr:
@@ -325,12 +329,13 @@ class Decoder(object):
         # TODO: raise LOADING_0
 
         xta = SubroutineQueue()
-        for i in range(0, pbyte + 1):
+        for i in range(pbyte):
             loop_addr = -1
             pgm_ctr = self.wfile.rd_gba_ptr(ptr + 4 + i * 4)
             self.channels.add()
             xta.clear()
             while True:
+                self.wfile.rd_addr = pgm_ctr
                 ctl_byte = self.wfile.rd_byte(pgm_ctr)
                 if 0x00 <= ctl_byte <= 0xB0 or ctl_byte in (0xCE, 0xCF, 0xB4):
                     pgm_ctr += 1
@@ -364,46 +369,20 @@ class Decoder(object):
             channels = self.channels
             cur_ch = channels[i]._replace(track_ptr=-1)
             cdr = 0
-            self.wfile.rd_addr = pgm_ctr
             print(f"-- READING CHANNEL {i} --")
             evt_queue = channels[i].evt_queue
             while True:
-                chk_loop_addr = pgm_ctr >= loop_addr and loop_addr != -1
-                if chk_loop_addr and cur_ch.loop_ptr == -1:
-                    loop_ptr = cur_ch.evt_queue.count + 1
-                    channels[i] = cur_ch._replace(loop_ptr=loop_ptr)
+                self.wfile.rd_addr = pgm_ctr
+                if pgm_ctr >= loop_addr and loop_addr != -1 and cur_ch.loop_ptr == -1:
+                    channels[i] = cur_ch._replace(
+                        loop_ptr=cur_ch.evt_queue.count)
                 ctl_byte = self.wfile.rd_byte()
                 print(hex(pgm_ctr), hex(ctl_byte))
-                chk_byte_rg = 0xb5 <= ctl_byte < 0xc5
-                if (chk_byte_rg and ctl_byte != 0xb9) or ctl_byte == 0xcd:
+                if (0xb5 <= ctl_byte < 0xc5 and
+                        ctl_byte != 0xb9) or ctl_byte == 0xcd:
                     cmd_arg = self.wfile.rd_byte()
                     if ctl_byte == 0xbc:
                         trnps = sbyte_to_int(cmd_arg)
-                    elif ctl_byte == 0xbd:
-                        lp = cmd_arg
-                    elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
-                        lc = ctl_byte
-                    e_args = (cticks, ctl_byte, cmd_arg, 0, 0)
-                    evt_queue.add(*e_args)
-                elif 0xc4 < ctl_byte < 0xcf:
-                    evt_queue.add(cticks, ctl_byte, 0, 0, 0)
-                elif ctl_byte == 0xb9:
-                    cmd_arg = self.wfile.rd_byte()
-                    e = self.wfile.rd_byte()
-                    sm = self.wfile.rd_byte()
-                    e_args = cticks, ctl_byte, cmd_arg, e, sm
-                    evt_queue.add(*e_args)
-                    pgm_ctr += 4
-                elif ctl_byte == 0xb4:
-                    if insub == 1:
-                        pgm_ctr = rpc  # pylint: disable=E0601
-                        insub = 0
-                    else:
-                        pgm_ctr += 1
-                elif ctl_byte == 0xb3:
-                    rpc = pgm_ctr + 5
-                    insub = 1
-                    pgm_ctr = self.wfile.rd_gba_ptr()
                 elif 0xcf <= ctl_byte <= 0xff:
                     pgm_ctr += 1
                     lc = ctl_byte
@@ -411,6 +390,7 @@ class Decoder(object):
                     n_ctr = 0
                     while not g:
                         cmd_arg = self.wfile.rd_byte()
+                        print(hex(cmd_arg))
                         if cmd_arg >= 0x80:
                             if not n_ctr:
                                 pn = lln[n_ctr] + trnps
@@ -493,6 +473,7 @@ class Decoder(object):
                                 h = self.inst_head, self.dct_head, self.gb_head
                                 dct_args = dcts, s_cdr, *h
                                 self.set_direct(*dct_args)
+                                print(dcts[s_cdr].output)
                                 if dcts[s_cdr].output in smp_out:
                                     h = self.dct_head, self.smp_head
                                     self.get_smp(dcts, s_cdr, *h, False)
@@ -696,16 +677,42 @@ class Decoder(object):
                     evt_queue.add(cticks, ctl_byte, 0, 0, 0)
                     cticks += stlen_to_ticks(ctl_byte - 0x80)
                     pgm_ctr += 1
+                elif ctl_byte == 0xbd:
+                    lp = cmd_arg
+                elif ctl_byte in (0xbe, 0xbf, 0xc0, 0xc4, 0xcd):
+                    lc = ctl_byte
+                    e_args = (cticks, ctl_byte, cmd_arg, 0, 0)
+                    evt_queue.add(*e_args)
+                elif 0xc4 < ctl_byte < 0xcf:
+                    evt_queue.add(cticks, ctl_byte, 0, 0, 0)
+                elif ctl_byte == 0xb9:
+                    cmd_arg = self.wfile.rd_byte()
+                    e = self.wfile.rd_byte()
+                    sm = self.wfile.rd_byte()
+                    e_args = cticks, ctl_byte, cmd_arg, e, sm
+                    evt_queue.add(*e_args)
+                    pgm_ctr += 4
+                elif ctl_byte == 0xb4:
+                    if insub == 1:
+                        pgm_ctr = rpc
+                        insub = 0
+                    else:
+                        pgm_ctr += 1
+                elif ctl_byte == 0xb3:
+                    rpc = pgm_ctr + 5
+                    insub = 1
+                    pgm_ctr = self.wfile.rd_gba_ptr()
                 if ctl_byte in (0xB1, 0xB2):
                     break
             evt_queue.add(cticks, ctl_byte, 0, 0, 0)
 
-        fmod.FSOUND_Init(44100, 64, 0)
+        fmod.FSOUND_Init(44100, 64, FSoundInitModes.FSOUND_INIT_GLOBALFOCUS)
         fmod.FSOUND_SetSFXMasterVolume(self.gbl_vol)
-
+        #fmod.FSOUND_SetSFXMasterVolume(100)
         quark = 0
         csm = FSoundChannelSampleMode
         sm = FSoundModes
+        print(fsound_get_error_string(fmod.FSOUND_GetError()))
         for i in self.smp_pool:
             smp = self.smp_pool[i]
             quark += 1
@@ -714,11 +721,13 @@ class Decoder(object):
                 if not int(smp.smp_data):
                     with open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
-
                     args = (csm.FSOUND_FREE, 'temp.raw', sm.FSOUND_8BITS +
                             sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL +
                             sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0)
                     fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    print(
+                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
                     os.remove('temp.raw')
@@ -728,6 +737,9 @@ class Decoder(object):
                             sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, smp.smp_data,
                             smp.size)
                     fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    print(
+                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
             else:
@@ -739,6 +751,9 @@ class Decoder(object):
                             (sm.FSOUND_LOOP_NORMAL if smp.loop else 0) +
                             sm.FSOUND_MONO + sm.FSOUND_SIGNED, 0, 0)
                     fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    print(
+                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     fmod.FSOUND_Sample_SetLoopPoints(
                         smp.fmod_smp, smp.loop_start, smp.size - 1)
@@ -750,6 +765,9 @@ class Decoder(object):
                              if smp.loop else 0) + sm.FSOUND_MONO +
                             sm.FSOUND_SIGNED, smp.smp_data, smp.size)
                     fmod_smp = fmod.FSOUND_Sample_Load(*args)
+                    print(
+                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     fmod.FSOUND_Sample_SetLoopPoints(
                         smp.fmod_smp, smp.loop_start, smp.size - 1)
@@ -818,7 +836,6 @@ class Decoder(object):
         self.ttl_ticks = 0
         self.ttl_msecs = 0
         self.beats = 0
-
         print('Done')
 
     def smp_exists(self, note_id: int) -> bool:
@@ -836,20 +853,15 @@ class Decoder(object):
 
     def stop_song(self):
         """Stop playing a song."""
-        File.from_id(1).close()
+        try:
+            File.from_id(1).close()
+        except AttributeError:
+            pass
+        print('stop')
         # File.from_id(2).close()
         # TODO: disable event processor
         fmod.FSOUND_Close()
         # TODO: close MIDI channel
-        if self.record:
-            self.log.debug('test')
-            self.record = False
-            self.mfile = File.from_id(42)
-            self.mfile.write_little_endian(0x0AFF2F00)
-            trk_len = self.mfile.size - 22
-            dbg_vars = trk_len, self.ttl_ticks
-            self.log.debug('StopSong(): Length: %s, total ticks: %s', *dbg_vars)
-            self.mfile.write_little_endian(unpack(self.flip_lng(trk_len), 0x13))
         # TODO: raise SONG_FINISH
 
     def evt_processor_timer(self, msecs: int) -> None:
@@ -866,12 +878,12 @@ class Decoder(object):
                 if n.wait_ticks <= 0 and n.enable and not n.note_off:
                     if not self.channels[n.parent].sustain:
                         n_r[i] = n._replace(note_off=True)
-            for i in range(1, self.channels.count + 1):
-                if not self.channels[i].enabled:
+            for i in range(self.channels.count):
+                if not self.channels[i].enable:
                     continue
 
                 c: Channel = self.channels[i]
-                for ep in range(len(self.rip_ears) + 1):
+                for ep in range(len(self.rip_ears)):
                     if self.rip_ears[ep] == c.patch_num:
                         self.channels[i] = c._replace(mute=True)
 
@@ -879,14 +891,13 @@ class Decoder(object):
                     wt = c.wait_ticks - (self.tick_ctr - self.prv_tick)
                     self.channels[i]._replace(wait_tick=wt)
 
-                oo = False
-                OP = False
                 o = True
 
                 ch = self.channels
 
                 while True:
                     cb = c.evt_queue[c.pgm_ctr].cmd_byte
+                    print(hex(cb))
                     if cb == 0xB1:
                         ch[i] = c._replace(enable=False)
                         o = False
@@ -895,6 +906,7 @@ class Decoder(object):
                         ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1)
                     elif cb == 0xBB:
                         self.tempo = c.evt_queue[c.pgm_ctr].arg1 * 2
+                        print(self.tempo)
                         if self.record:
                             ec = chr(0xFF) + chr(0x51)
                             self.buffer_evt(ec, self.ttl_ticks)
@@ -930,7 +942,7 @@ class Decoder(object):
                                     n.env_pos)
                                 if mutethis:
                                     dav = 0
-                                if self.output == SongOutputTypes.WAVE:
+                                if self.output == SongTypes.WAVE:
                                     d = dav * 0 if c.mute else 1
                                     fmod.FSOUND_SetVolume(n.fmod_channel, d)
                         ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, main_vol=v)
@@ -949,7 +961,7 @@ class Decoder(object):
                         na = self.note_arr
                         for note in c.notes:
                             n: Note = na[note.note_id]
-                            if n.enabled and n.parent == i:
+                            if n.enable and n.parent == i:
                                 f = n.freq * 2**(1 / 12)**((
                                     c.pitch - 0x40) / 0x40 * c.pitch_range)
                                 fmod.FSOUND_SetFrequency(n.fmod_channel, f)
@@ -975,7 +987,7 @@ class Decoder(object):
                         na = self.note_arr
                         for note in c.notes:
                             n: Note = na[note.note_id]
-                            if n.enabled and not n.note_off:
+                            if n.enable and not n.note_off:
                                 na[note.note_id] = n._replace(note_off=True)
                         ch[i] = c._replace(pgm_ctr=c.pgm_ctr + 1, sustain=s)
                     elif cb == 0xB3:
@@ -999,6 +1011,7 @@ class Decoder(object):
                         pc = c.loop_ptr
                         ch[i] = c._replace(pgm_ctr=pc, in_sub=i)
                     elif cb >= 0xCF:
+                        input()
                         e = c.evt_queue[c.pgm_ctr]
                         cb = e.cmd_byte
                         ll = stlen_to_ticks(cb - 0xCF) + 1
@@ -1011,6 +1024,7 @@ class Decoder(object):
                         uu = e.arg3
                         self.note_q.add(True, 0, nn, 0, vv, i, uu, 0, 0, 0, 0,
                                         0, ll, c.patch_num)
+                        print(self.note_q)
                         pc = c.pgm_ctr + 1
                         ch[i] = c._replace(pgm_ctr=pc, sustain=s)
                     elif cb <= 0xB0:
@@ -1029,12 +1043,10 @@ class Decoder(object):
                     else:
                         pc = c.pgm_ctr + 1
                         ch[i] = c._replace(pgm_ctr=pc)
-                    oo = True
                     if c.wait_ticks > 0:
                         break
                 if not o:
                     break
-            mmx = -1
             if self.channels.count > 0:
                 clear_channel: List[bool] = [
                     bool() for i in range(self.channels.count)
@@ -1045,42 +1057,329 @@ class Decoder(object):
                     na = self.note_arr
                     if x < 32:
                         na[x] = note
-                        c2 = self.channels[note.parent]
+                        chan: Channel = self.channels[note.parent]
                         if not clear_channel[note.parent]:
                             clear_channel[note.parent] = True
-                            for note2 in c2.notes:
+                            for note2 in chan.notes:
                                 n: Note = na[note2.note_id]
-                                if n.enabled and not n.note_off:
+                                if n.enable and not n.note_off:
                                     na[note2.note_id] = n._replace(
                                         note_off=True)
-                        c.notes.add(x, str(x))
+                        chan.notes.add(x, str(x))
                         pat = note.patch_num
+                        s_pat = str(pat)
                         nn = note.note_num
-
+                        s_nn = str(nn)
+                        n: Note = na[x]
+                        out = (DirectTypes.DIRECT, DirectTypes.WAVE)
+                        out2 = (DirectTypes.SQUARE1, DirectTypes.SQUARE2)
+                        das = 0
                         if self.dct_exists(self.directs, pat):
-                            s_pat = str(pat)
                             dct: Direct = self.directs[s_pat]
                             ot = dct.output
                             ea = dct.env_attn
-                            ed = dct.env_dec1
+                            ed = dct.env_dcy
                             es = dct.env_sus
                             er = dct.env_rel
-                            if ot in (DirectTypes.DIRECT, DirectTypes.WAVE):
-                                das = str(dct.smp_id)
+
+                            na[x] = n._replace(
+                                output=ot,
+                                env_attn=ea,
+                                env_dcy=ed,
+                                env_sus=es,
+                                env_rel=er)
+                            if ot in out:
                                 s = self.smp_pool[das]
-                                daf = note_to_freq(nn + (60 - dct.drum_key), -1
-                                                   if s.gb_wave else s.freq)
+                                f = -1 if s.gb_wave else s.freq
+                                das = str(dct.smp_id)
+                                daf = note_to_freq(nn + (60 - dct.drum_key), f)
                                 if s.gb_wave:
                                     daf /= 2
-                            elif ot in (DirectTypes.SQUARE1,
-                                        DirectTypes.SQUARE2):
-                                pass
+                            elif ot in out2:
+                                das = f'square{dct.gb1 % 4}'
+                                daf = note_to_freq(nn + (60 - dct.drum_key))
+                            elif ot == DirectTypes.NOISE:
+                                das = f'noise{dct.gb1 % 2}{int(random.random() * 3)}'
+                                daf = note_to_freq(nn + (60 - dct.drum_key))
+                            else:
+                                das = ''
+                        elif self.drm_exists(pat):
+                            dct: Direct = self.drmkits[s_pat].directs[s_nn]
+                            ot = dct.output
+                            ea = dct.env_attn
+                            ed = dct.env_dcy
+                            es = dct.env_sus
+                            er = dct.env_rel
+
+                            na[x] = n._replace(
+                                output=ot,
+                                env_attn=ea,
+                                env_dcy=ed,
+                                env_sus=es,
+                                env_rel=er)
+                            if ot in out:
+                                das = str(dct.smp_id)
+                                smp: Sample = self.smp_pool[das]
+                                if dct.fix_pitch and not smp.gb_wave:
+                                    daf = smp.freq
+                                else:
+                                    daf = note_to_freq(dct.drum_key, -2
+                                                       if smp.gb_wave else
+                                                       smp.freq)
+                            elif ot in out2:
+                                das = f'sqaure{dct.gb1 % 4}'
+                                daf = note_to_freq(dct.drum_key)
+                            elif ot == DirectTypes.NOISE:
+                                das = f'noise{dct.gb1 % 2}{int(random.random() * 3)}'
+                                daf = note_to_freq(dct.drum_key)
+                            else:
+                                das = ''
+                        else:
+                            das = ''
+
+                        if not das:
+                            daf *= 2**(1 / 12)**self.transpose
+                            dav = int(note.velocity / 0x7F) * int(
+                                chan.main_vol / 0x7F) * 255
+                            if mutethis:
+                                dav = 0
+                            ot = na[x].output
+                            if ot == NoteTypes.SQUARE1:
+                                if self.gb1_chan < 32:
+                                    gbn: Note = na[self.gb1_chan]
+                                    if self.output == SongTypes.WAVE:
+                                        fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                na[self.gb1_chan] = gbn._replace(
+                                    fmod_channel=0, enable=False)
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb1_chan))
+                                self.gb1_chan = x
+                            elif ot == NoteTypes.SQUARE2:
+                                if self.gb2_chan < 32:
+                                    gbn: Note = na[self.gb2_chan]
+                                    if self.output == SongTypes.WAVE:
+                                        fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                na[self.gb2_chan] = gbn._replace(
+                                    fmod_channel=0, enable=False)
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb2_chan))
+                                self.gb2_chan = x
+                            elif ot == NoteTypes.WAVE:
+                                if self.gb3_chan < 32:
+                                    gbn: Note = na[self.gb3_chan]
+                                    if self.output == SongTypes.WAVE:
+                                        fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                na[self.gb3_chan] = gbn._replace(
+                                    fmod_channel=0, enable=False)
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb3_chan))
+                                self.gb3_chan = x
+                            elif ot == NoteTypes.NOISE:
+                                if self.gb4_chan < 32:
+                                    gbn: Note = na[self.gb4_chan]
+                                    if self.output == SongTypes.WAVE:
+                                        fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                na[self.gb4_chan] = gbn._replace(
+                                    fmod_channel=0, enable=False)
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb4_chan))
+                                self.gb4_chan = x
+
+                            n: Note = na[x]
+                            if self.output == SongTypes.WAVE:
+                                if not mutethis:
+                                    fc = fmod.FSOUND_PlaySound(
+                                        x + 1, self.smp_pool[das].fmod_smp)
+                                    print(fc)
+                                else:
+                                    x = x
+                            else:
+                                fc = note.parent
+                            na[x] = n._replace(
+                                fmod_channel=fc,
+                                freq=daf,
+                                phase=NotePhases.INITIAL)
+                            n: Note = na[x]
+                            if self.output == SongTypes.WAVE:
+                                fmod.FSOUND_SetFrequency(
+                                    n.fmod_channel, (daf * 2**(1 / 12))
+                                    **((chan.pitch - 0x40) / 0x40 *
+                                       chan.pitch_range))
+                                fmod.FSOUND_SetVolume(n.fmod_channel, dav * 0
+                                                      if chan.mute else 1)
+                                fmod.FSOUND_SetPan(n.fmod_channel,
+                                                   chan.panning * 2)
+                            # TODO: RaiseEvent PlayedANote
+            self.note_q.clear()
+            na = self.note_arr
+
+            if self.note_f_ctr > 0:
+                for i in range(32):
+                    n: Note = na[i]
+                    if na[i].enable:
+                        if n.output == NoteTypes.DIRECT:
+                            if n.note_off and n.phase < NotePhases.RELEASE:
+                                es = 0
+                                np = NotePhases.RELEASE
+                                na[i] = n._replace(env_step=es, phase=np)
+                            n: Note = na[i]
+                            if not n.env_step or n.env_pos == n.env_dest or (
+                                    not n.env_step and (n.env_pos <= n.env_dest)
+                            ) or (n.env_step >= 0 and n.env_pos >= n.env_dest):
+                                np = n.phase
+                                if np == NotePhases.INITIAL:
+                                    np = NotePhases.ATTACK
+                                    ep = 0
+                                    ed = 255
+                                    es = n.env_attn
+                                    na[i] = n._replace(
+                                        phase=np,
+                                        env_pos=ep,
+                                        env_dest=ed,
+                                        env_sus=es)
+                                elif np == NotePhases.ATTACK:
+                                    np = NotePhases.DECAY
+                                    ed = n.env_sus
+                                    es = (n.env_dcy - 0x100) / 2
+                                    na[i] = n._replace(
+                                        phase=np, env_dest=ed, env_eus=es)
+                                elif np == NotePhases.DECAY:
+                                    np = NotePhases.SUSTAIN
+                                    es = 0
+                                    na[i] = n._replace(phase=np, env_sus=0)
+                                elif np == NotePhases.RELEASE:
+                                    np = NotePhases.NOTEOFF
+                                    ed = 0
+                                    es = n.env_rel - 0x100
+                                    na[i] = n._replace(
+                                        phase=np, env_dest=0, env_sus=es)
+                                elif np == NotePhases.NOTEOFF:
+                                    if self.output == SongTypes.WAVE:
+                                        fmod.FSOUND_StopSound(n.fmod_channel)
+                                n: Note = na[i]
+                        nex = n.env_pos = n.env_step
+                        if nex > n.env_dest and n.env_step > 0 or nex < n.env_dest and n.env_step < 0:
+                            nex = n.env_dest
+                        na[i] = n._replace(env_pos=nex)
+                        n: Note = na[i]
+                        dav = int(n.velocity / 0x7F) * int(
+                            self.channels[n.parent].main_vol / 0x7F) * (
+                                int(n.env_pos) / 0xFF * 255)
+                        if mutethis:
+                            dav = 0
+                        if self.output == SongTypes.WAVE:
+                            fmod.FSOUND_SetVolume(
+                                n.fmod_channel, dav * 0
+                                if self.channels[n.parent].mute else 1)
+                    else:
+                        if n.note_off and n.phase < NotePhases.RELEASE:
+                            es = 0
+                            np = NotePhases.RELEASE
+                            na[i] = n._replace(env_step=es, phase=np)
+                            n: Note = na[i]
+                        if not n.env_step or n.env_pos == n.env_dest or (
+                                not n.env_step and
+                            (n.env_pos <= n.env_dest)) or (
+                                n.env_step >= 0 and n.env_pos >= n.env_dest):
+                            np = n.phase
+                            if np == NotePhases.INITIAL:
+                                np = NotePhases.ATTACK
+                                ep = 0
+                                ed = 255
+                                es = 0x100 - n.env_attn * 8
+                                na[i] = n._replace(
+                                    phase=np,
+                                    env_pos=ep,
+                                    env_dest=ed,
+                                    env_step=es)
+                            elif np == NotePhases.ATTACK:
+                                np = NotePhases.DECAY
+                                ed = n.env_sus
+                                es = -n.env_dcy * 2
+                                na[i] = n._replace(
+                                    phase=np, env_dest=ed, env_step=es)
+                            elif np == NotePhases.DECAY:
+                                np = NotePhases.SUSTAIN
+                                es = 0
+                                na[i] = n._replace(phase=np, env_step=es)
+                            elif np == NotePhases.SUSTAIN:
+                                es = 0
+                                na[i] = n._replace(env_step=es)
+                            elif np == NotePhases.RELEASE:
+                                np = NotePhases.NOTEOFF
+                                ed = 0
+                                es = (0x8 - n.env_rel) * 2
+                                na[i] = n._replace(
+                                    phase=np, env_dest=ed, env_step=es)
+                            elif np == NotePhases.NOTEOFF:
+                                ot = n.output
+                                if ot == NoteTypes.SQUARE1:
+                                    self.gb1_chan = 255
+                                elif ot == NoteTypes.SQUARE2:
+                                    self.gb2_chan = 255
+                                elif ot == NoteTypes.WAVE:
+                                    self.gb3_chan = 255
+                                elif ot == NoteTypes.NOISE:
+                                    self.gb4_chan = 255
+                                if self.output == SongTypes.WAVE:
+                                    fmod.FSOUND_StopSound(n.fmod_channel)
+                                self.channels[n.parent].notes.remove(str(i))
+                                na[i] = n._replace(fmod_channel=0, enable=False)
+                            n: Note = na[i]
+
+                        nex = n.env_pos + n.env_step
+                        if nex > n.env_dest and n.env_step > 0 or nex < n.env_dest and n.env_step > 0:
+                            nex = n.env_dest
+                        na[i] = n._replace(env_pos=nex)
+
+                        dav = int(n.velocity / 0x7F) * int(
+                            self.channels[n.parent].main_vol / 0x7F) * (
+                                int(n.env_pos) / 0xFF * 255)
+                        if mutethis:
+                            dav = 0
+                        if self.output == SongTypes.WAVE:
+                            fmod.FSOUND_SetVolume(
+                                n.fmod_channel, dav * 0
+                                if self.channels[n.parent].mute else 1)
+
+            xmmm = False
+            for i in range(self.channels.count):
+                if self.channels[i].enable:
+                    xmmm = True
+            if not xmmm or not self.tempo:
+                pass
+                # self.stop_song()
+                # TODO: RaiseEvent SongFinish
+
+        self.prv_tick = 0
+        # self.tick_ctr = 0
+        self.incr += 1
+        if self.incr >= int(60000 / (self.tempo * self.SAPPY_PPQN)):
+            self.tick_ctr = 1
+            self.ttl_ticks += 1
+            if not self.ttl_ticks % 48:
+                self.beats += 1
+                # TODO: RaiseEvent Beat(self.beats)
+            self.incr = 0
+
+        self.note_f_ctr = 1
+
+        if self.tempo != self.last_tempo:
+            self.last_tempo = self.tempo
+            # TODO: EvtProcessor Stuff
 
 
 def main():
     """Main test method."""
     d = Decoder()
-    d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x0008F2C8)
+    d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x8F2C0)
+    while True:
+        d.tick_ctr = 1
+        d.evt_processor_timer(1)
+        #fmod.FSOUND_Update()
+        print(
+            fsound_get_error_string(fmod.FSOUND_GetError()), d.ttl_msecs,
+            d.tick_ctr, d.ttl_ticks)
 
 
 if __name__ == '__main__':
