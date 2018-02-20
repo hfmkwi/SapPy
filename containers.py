@@ -171,6 +171,7 @@ class Collection(deque, UserDict):
 
     def __next__(self):
         try:
+            self._list = tuple(deque.__iter__(self))
             if self._list[self._ind] in self.data:
                 out = self.data[self._list[self._ind]]
             else:
@@ -193,10 +194,10 @@ class Collection(deque, UserDict):
         if type(key) == str:
             self.data[key] = item
         elif type(key) == int:
-            out = self.__getitem__(key)
+            out = deque.__getitem__(self, key)
             deque.__setitem__(self, key, item)
             if out in self.data:
-                self.remove(out)
+                self.data[out] = item
 
     def __repr__(self):
         return [

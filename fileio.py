@@ -350,7 +350,7 @@ class File(object):  # pylint: disable=R0902
             out += self.rd_byte() * 256**i
         return out
 
-    def rd_str(self, len: int, addr: int = None) -> str:
+    def rd_str(self, length: int, addr: int = None) -> str:
         """Read a stream of int as a string from file
 
         Args:
@@ -363,7 +363,7 @@ class File(object):  # pylint: disable=R0902
         """
         self.rd_addr = addr
         out = []
-        for __ in range(len):
+        for __ in range(length):
             out.append(self.rd_byte())
         out = map(chr, out)
         return ''.join(out)

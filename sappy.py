@@ -93,7 +93,7 @@ class Decoder(object):
         self.drmkits:      DrumKitQueue[DrumKit]       = DrumKitQueue()  # pylint:    disable = E1136
         self.inst_head:    InstrumentHeader            = InstrumentHeader()
         self.insts:        InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
-        self.note_arr:     Collection[Note]            = Collection([Note()] * 32)
+        self.note_arr:     Collection                  = Collection([Note()] * 32)
         self.nse_wavs:     List[List[str]]             = [[[] for i in range(10)] for i in range(2)]
         self.mul_head:     MultiHeader                 = MultiHeader()
         self.gb_head:      NoiseHeader                 = NoiseHeader()
@@ -240,7 +240,7 @@ class Decoder(object):
                 self.smp_head = rd_smp_head(1, File.gba_ptr_to_addr(sid))
                 smp: Sample = self.smp_pool[s_sid]
                 if use_readstr:
-                    smp_data = self.wfile.rd_str(smp.size)
+                    smp_data = self.wfile.rd_str(smp.size, self.wfile.rd_addr)
                 else:
                     smp_data = self.wfile._file.tell()
                 self.smp_pool[s_sid] = smp._replace(
@@ -248,16 +248,10 @@ class Decoder(object):
                     freq=smp_head.freq * 64,
                     loop_start=smp_head.loop,
                     loop=smp_head.flags > 0,
-                    gb_wave=False)
+                    gb_wave=False,
+                    smp_data=smp_data)
             else:
-                smp: Sample = self.smp_pool[s_sid]
-                tsi = self.wfile.rd_str(16, File.gba_ptr_to_addr(sid))
-                smp_data = []
-                print(tsi)
                 raise Exception
-                for ai in range(32):
-                    bi = ai % 2
-                    smp_data.append(chr(int(0)))
 
     get_mul_smp = get_smp
 
@@ -784,18 +778,24 @@ class Decoder(object):
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
             else:
-                val = int(smp.smp_data) if smp.smp_data else 0
-                if not val:
+                if int(smp.smp_data) == 0:
                     with open_new_file('temp.raw', 2) as f:
+                        self.log.debug('writing str %s', smp.smp_data)
                         f.wr_str(smp.smp_data)
                     fmod_smp = fmod.FSOUND_Sample_Load(
-                        csm.FSOUND_FREE, b'temp.raw', sm.FSOUND_8BITS +
-                        sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL if smp.loop
-                        else 0 + sm.FSOUND_MONO + sm.FSOUND_SIGNED, 0, 0)
+                        csm.FSOUND_FREE,
+                        'temp.raw'.encode(encoding='ascii'),
+                        sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
+                        sm.FSOUND_LOOP_NORMAL
+                        if smp.loop else 0 + sm.FSOUND_MONO + sm.FSOUND_SIGNED,
+                        0,
+                        0)
                     print(
-                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                        f'no gbwav temp.raw load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
                     )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
+                    self.log.debug('smp %s fmod_smp %s', i,
+                                   self.smp_pool[i].fmod_smp)
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(
                         smp.fmod_smp, smp.loop_start, smp.size - 1)
@@ -810,7 +810,7 @@ class Decoder(object):
                         smp.smp_data,
                         smp.size)
                     print(
-                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                        f'no gbwav fpath load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
                     )
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     smp: Sample = self.smp_pool[i]
@@ -823,7 +823,7 @@ class Decoder(object):
             f_nse = f'noise0{i}.raw'.encode(encoding='ascii')
             with open_new_file(f_nse, 2) as f:
                 f.wr_str(self.nse_wavs[0][i])
-            self.smp_pool[i] = smp._replace(
+            self.smp_pool[f'noise0{i}'] = smp._replace(
                 freq=7040,
                 size=16384,
                 smp_data='',
@@ -831,8 +831,9 @@ class Decoder(object):
                     csm.FSOUND_FREE, f_nse,
                     sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
                     + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
-            self.log.info('loaded noise0%s err: %s', i, fsound_get_error())
-            smp: Sample = self.smp_pool[i]
+            smp: Sample = self.smp_pool[f'noise0{i}']
+            self.log.info('loaded noise0%s fmod_smp: %s err: %s', i,
+                          smp.fmod_smp, fsound_get_error())
             fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 16383)
             self.log.info('set noise0%s loop points err: %s', i,
                           fsound_get_error())
@@ -841,7 +842,7 @@ class Decoder(object):
             f_nse = f'noise1{i}.raw'.encode(encoding='ascii')
             with open_new_file(f_nse, 2) as f:
                 f.wr_str(self.nse_wavs[1][i])
-            self.smp_pool[i] = smp._replace(
+            self.smp_pool[f'noise1{i}'] = smp._replace(
                 freq=7040,
                 size=256,
                 smp_data='',
@@ -849,8 +850,9 @@ class Decoder(object):
                     csm.FSOUND_FREE, f_nse,
                     sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
                     + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0))
-            self.log.info('loaded noise1%s err: %s', i, fsound_get_error())
-            smp: Sample = self.smp_pool[i]
+            smp: Sample = self.smp_pool[f'noise1{i}']
+            self.log.info('loaded noise1%s fmod_smp: %s err: %s', i,
+                          smp.fmod_smp, fsound_get_error())
             fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 255)
             self.log.info('set noise1%s loop points err: %s', i,
                           fsound_get_error())
@@ -1007,6 +1009,9 @@ class Decoder(object):
                                     dav = 0
                                 fmod.FSOUND_SetVolume(n.fmod_channel, dav * 0
                                                       if chan.mute else 1)
+                                self.log.debug(
+                                    'CMD 0xBE set vol chan %s err: %s',
+                                    n.fmod_channel, fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
@@ -1019,6 +1024,9 @@ class Decoder(object):
                             if n.enable and n.parent == i:
                                 fmod.FSOUND_SetPan(n.fmod_channel,
                                                    chan.panning * 2)
+                                self.log.debug(
+                                    'CMD 0xBF set pan chan %s err; %s',
+                                    n.fmod_channel, fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
@@ -1034,6 +1042,10 @@ class Decoder(object):
                                     n.fmod_channel, n.freq * 2**(1 / 12)**
                                     ((chan.pitch - 0x40
                                      ) / 0x40 * chan.pitch_range))
+                                self.log.debug(
+                                    'CMD 0xC0 set freq chan %s note %s err: %s',
+                                    n.fmod_channel, n.note_id,
+                                    fsound_get_error())
                     elif cmd == 0xC1:
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1,
@@ -1047,6 +1059,10 @@ class Decoder(object):
                                     n.fmod_channel, n.freq * 2**(1 / 12)**
                                     ((chan.pitch - 0x40
                                      ) / 0x40 * chan.pitch_range))
+                                self.log.debug(
+                                    'CMD 0xC0 set freq chan %s note %s err: %s',
+                                    n.fmod_channel, n.note_id,
+                                    fsound_get_error())
                     elif cmd == 0xC2:
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1,
@@ -1099,6 +1115,7 @@ class Decoder(object):
                         nn = chan.evt_queue[chan.pgm_ctr].arg1
                         vv = chan.evt_queue[chan.pgm_ctr].arg2
                         uu = chan.evt_queue[chan.pgm_ctr].arg3
+                        self.log.debug('nn %s vv %s uu %s', nn, vv, uu)
                         self.note_q.add(True, 0, nn, 0, vv, i, uu, 0, 0, 0, 0,
                                         0, ll, chan.patch_num)
                         self.channels[i] = chan._replace(
@@ -1214,7 +1231,8 @@ class Decoder(object):
                                 env_sus=dct.env_sus,
                                 env_rel=dct.env_rel)
                             if dct.output in std_out:
-                                das = str(dct.smp_id)
+                                das = str(
+                                    self.drmkits[s_pat].directs[s_nn].smp_id)
                                 if dct.fix_pitch and not self.smp_pool[das].gb_wave:
                                     daf = self.smp_pool[das].freq
                                 else:
@@ -1233,7 +1251,7 @@ class Decoder(object):
                         else:
                             das = ''
 
-                        if das:
+                        if das != '':
                             daf *= (2**(1 / 12))**self.transpose
                             dav = (n.velocity / 0x7F) * ((
                                 chan.main_vol / 0x7F) * 255)
@@ -1244,6 +1262,9 @@ class Decoder(object):
                                 gbn: Note = self.note_arr[self.gb1_chan]
                                 if self.gb1_chan < 32:
                                     fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                    self.log.debug(
+                                        'GB1 chan %s stop sound err: %s',
+                                        gbn.fmod_channel, fsound_get_error())
                                     self.note_arr[self.gb1_chan] = gbn._replace(
                                         fmod_channel=0, enable=False)
                                     gbn: Note = self.note_arr[self.gb1_chan]
@@ -1254,6 +1275,9 @@ class Decoder(object):
                                 gbn: Note = self.note_arr[self.gb2_chan]
                                 if self.gb2_chan < 32:
                                     fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                    self.log.debug(
+                                        'GB2 chan %s stop sound err: %s',
+                                        gbn.fmod_channel, fsound_get_error())
                                     self.note_arr[self.gb2_chan] = gbn._replace(
                                         fmod_channel=0, enable=False)
                                     gbn: Note = self.note_arr[self.gb2_chan]
@@ -1264,6 +1288,9 @@ class Decoder(object):
                                 gbn: Note = self.note_arr[self.gb3_chan]
                                 if self.gb3_chan < 32:
                                     fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                    self.log.debug(
+                                        'GB3 chan %s stop sound err: %s',
+                                        gbn.fmod_channel, fsound_get_error())
                                     self.note_arr[self.gb3_chan] = gbn._replace(
                                         fmod_channel=0, enable=False)
                                     gbn: Note = self.note_arr[self.gb3_chan]
@@ -1274,6 +1301,9 @@ class Decoder(object):
                                 gbn: Note = self.note_arr[self.gb4_chan]
                                 if self.gb4_chan < 32:
                                     fmod.FSOUND_StopSound(gbn.fmod_channel)
+                                    self.log.debug(
+                                        'GB4 chan %s stop sound err: %s',
+                                        gbn.fmod_channel, fsound_get_error())
                                     self.note_arr[self.gb4_chan] = gbn._replace(
                                         fmod_channel=0, enable=False)
                                     gbn: Note = self.note_arr[self.gb4_chan]
@@ -1283,14 +1313,18 @@ class Decoder(object):
 
                             n: Note = self.note_arr[x]
                             if self.output == SongTypes.WAVE:
-                                self.note_arr[x] = self.note_arr[x]._replace(
-                                    fmod_channel=fmod.FSOUND_PlaySound(
-                                        c_long(x + 1),
-                                        c_long(self.smp_pool[das].fmod_smp)))
+                                for i in self.smp_pool.data.items():
+                                    print(i)
+                                out = fmod.FSOUND_PlaySound(
+                                    x + 1, self.smp_pool[das].fmod_smp)
+
                                 self.log.debug(
-                                    'Play sound chan %s smp %s err: %s', x + 1,
+                                    'Play sound das %s chan %s smp %s err: %s',
+                                    hex(int(das)), x + 1,
                                     self.smp_pool[das].fmod_smp,
                                     fsound_get_error())
+                                self.note_arr[x] = self.note_arr[x]._replace(
+                                    fmod_channel=out)
                             else:
                                 self.note_arr[x] = self.note_arr[x]._replace(
                                     fmod_channel=n.parent + 1)
@@ -1303,8 +1337,14 @@ class Decoder(object):
                                                **((chan.pitch - 0x40) / 0x40 *
                                                   chan.pitch_range))
                                 fmod.FSOUND_SetFrequency(n.fmod_channel, freq)
+                                self.log.debug(
+                                    'Set frequency chan: %s freq: %s err: %s',
+                                    n.fmod_channel, freq, fsound_get_error())
                                 vol = dav * 0 if chan.mute else 1
                                 fmod.FSOUND_SetVolume(n.fmod_channel, vol)
+                                self.log.debug(
+                                    'Set volume: %s chan: %s err: %s', vol,
+                                    n.fmod_channel, fsound_get_error())
                                 fmod.FSOUND_SetPan(n.fmod_channel,
                                                    chan.panning * 2)
                             # TODO: RaiseEvent PlayedANote
@@ -1351,7 +1391,7 @@ class Decoder(object):
                                         env_step=n.env_rel - 0x100)
                                     n: Note = self.note_arr[i]
                                 elif phase == NotePhases.NOTEOFF:
-                                    fmod.FSOUND_StopSound(n.fmod_channel + 1)
+                                    fmod.FSOUND_StopSound(n.fmod_channel)
                                     self.log.debug('Stop sound chan %r err: %s',
                                                    n.fmod_channel + 1,
                                                    fsound_get_error())
@@ -1489,17 +1529,16 @@ def main():
     """Main test method."""
     import time
     d = Decoder()
-    d.play_song(
-        'C:\\Users\\chenc\\Downloads\\Metroid - Zero Mission (U) [!]\\Metroid - Zero Mission (U) [!].gba',
-        1, 0x8F2C0)
+    d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x8F2C0)
     l = len(d.channels)
-    while True:
+    for i in range(40):
         d.evt_processor_timer(1)
-        #fmod.FSOUND_Update()
+        fmod.FSOUND_Update()
         print(fsound_get_error(), d.note_f_ctr, d.ttl_msecs, d.tick_ctr,
               d.ttl_ticks)
         assert l == len(d.channels)
         time.sleep(0.1)
+    fmod.FSOUND_Close()
 
 
 if __name__ == '__main__':
