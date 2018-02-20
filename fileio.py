@@ -125,6 +125,7 @@ class File(object):  # pylint: disable=R0902
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
+        print(hex(ptr))
         if ptr < 0x8000000 or ptr > 0x9FFFFFF:
             return -1
         return ptr - 0x8000000
@@ -182,10 +183,8 @@ class File(object):  # pylint: disable=R0902
             A int-like object representing one single byte
 
         """
-        if addr is None:
-            addr = self.rd_addr
         self.rd_addr = addr
-        self._file.seek(addr)
+        self._file.seek(self.rd_addr)
         byte = struct.unpack('B', self._file.read(1))[0]
         self.rd_addr = self._file.tell()
         return byte
@@ -237,7 +236,7 @@ class File(object):  # pylint: disable=R0902
         else:
             self._close()
 
-    w_byte = _put
+    wr_byte = _put
 
     def wr_bgendian(self, width: int, data: int, addr: int = None) -> None:
         """Write an integer as int in big-endian format to file
@@ -252,7 +251,7 @@ class File(object):  # pylint: disable=R0902
         self.wr_addr = addr
         for i in range(width):
             byte = data // 16**(i * 2) % 256
-            self.w_byte(byte)
+            self.wr_byte(byte)
 
     def wr_ltendian(self, width: int, data: int, addr: int = None) -> None:
         """Write an integer as int in little-endian format to file
@@ -267,7 +266,7 @@ class File(object):  # pylint: disable=R0902
         self.wr_addr = addr
         for i in range(width - 1, -1, -1):
             byte = data // 16**(i * 2) % 256
-            self.w_byte(byte)
+            self.wr_byte(byte)
 
     def wr_str(self, data: str, addr: int = None) -> None:
         """Write a string as int to file
@@ -280,7 +279,7 @@ class File(object):  # pylint: disable=R0902
         self.wr_addr = addr
         data = map(ord, data)
         for char in data:
-            self.w_byte(char)
+            self.wr_byte(char)
 
     def rd_byte(self, addr: int = None) -> int:
         """Read a byte from file
@@ -293,7 +292,8 @@ class File(object):  # pylint: disable=R0902
             an integer [0-255]
 
         """
-        return self._get(addr)
+        self.rd_addr = addr
+        return self._get(self.rd_addr)
 
     def rd_vlq(self, addr: int = None) -> int:
         """Read a stream of int in VLQ format
@@ -379,7 +379,9 @@ class File(object):  # pylint: disable=R0902
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
-        ptr = self.rd_ltendian(4, addr)
+        self.rd_addr = addr
+        ptr = self.rd_ltendian(4, self.rd_addr)
+        print(hex(ptr))
         return self.gba_ptr_to_addr(ptr)
 
 

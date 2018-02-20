@@ -2,7 +2,7 @@
 #-*- coding: utf-8 -*-
 # pylint: disable=C0326,E1120,R0903
 """Player types"""
-from struct import unpack
+from struct import unpack, pack
 from typing import NamedTuple
 
 from fileio import File
@@ -11,10 +11,9 @@ __all__ = ('DirectHeader', 'DrumKitHeader', 'InstrumentHeader', 'InvalidHeader',
            'MasterTableEntry', 'MasterTableEntry', 'MultiHeader', 'NoiseHeader',
            'NoiseHeader', 'SampleHeader', 'SongHeader', 'SquareOneHeader',
            'SquareTwoHeader', 'WaveHeader', 'note_to_name', 'note_to_freq',
-           'rd_dct_head', 'rd_drmkit_head', 'rd_inst_head',
-           'rd_inv_head', 'rd_nse_head', 'rd_mul_head',
-           'rd_smp_head', 'rd_sng_head', 'rd_sq1_head',
-           'rd_sq2_head', 'rd_wav_head', 'sbyte_to_int',
+           'rd_dct_head', 'rd_drmkit_head', 'rd_inst_head', 'rd_inv_head',
+           'rd_nse_head', 'rd_mul_head', 'rd_smp_head', 'rd_sng_head',
+           'rd_sq1_head', 'rd_sq2_head', 'rd_wav_head', 'sbyte_to_int',
            'stlen_to_ticks')
 
 # yapf: disable
@@ -246,7 +245,7 @@ def note_to_name(midi_note: bytes) -> str:
 
 def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
     """Retrieve the sound frequency of a MIDI note relative to C3."""
-    magic = 2 ** (1/12)
+    magic = 2**(1 / 12)
     delta_x = midi_note - 0x3C
     if midc_freq == -1:
         a_freq = 7040
@@ -371,11 +370,12 @@ def rd_smp_head(file_id: int, addr: int = None) -> SampleHeader:
     w_file.rd_addr = addr
     # yapf: disable
     header = SampleHeader(
-        tracks    = w_file.rd_ltendian(4),
-        blks      = w_file.rd_byte(),
-        pri       = w_file.rd_byte(),
-        reverb    = w_file.rd_ltendian(4),
-        inst_bank = w_file.rd_ltendian(4)
+        flags     = w_file.rd_ltendian(4),
+        b4        = w_file.rd_byte(),
+        fine_tune = w_file.rd_byte(),
+        freq      = w_file.rd_ltendian(2),
+        loop      = w_file.rd_ltendian(4),
+        size      = w_file.rd_ltendian(4)
     )
     # yapf: enable
     return header
@@ -459,7 +459,7 @@ def rd_wav_head(file_id: int, addr: int = None) -> WaveHeader:
 
 def sbyte_to_int(sbyte: int) -> int:
     """Convert a signed 4-byte bytearray into a signed integer."""
-    return unpack('i', sbyte)
+    return unpack('i', pack('bbbb', sbyte, 0, 0, 0))[0]
 
 
 def stlen_to_ticks(short_len: int) -> int:

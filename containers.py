@@ -164,6 +164,22 @@ class Collection(deque, UserDict):
             out = self.__getitem__(out)
         return out
 
+    def __iter__(self):
+        self._list = tuple(deque.__iter__(self))
+        self._ind = 0
+        return self
+
+    def __next__(self):
+        try:
+            if self._list[self._ind] in self.data:
+                out = self.data[self._list[self._ind]]
+            else:
+                out = self._list[self._ind]
+        except IndexError:
+            raise StopIteration
+        self._ind += 1
+        return out
+
     def __eq__(self, other: 'Container') -> bool:
         return deque.__eq__(self, other) and self.data == other.data
 
@@ -183,7 +199,10 @@ class Collection(deque, UserDict):
                 self.remove(out)
 
     def __repr__(self):
-        return f'Container({self.data}, {tuple(self)})'
+        return [
+            i if not self.data.get(i) else self.data[i]
+            for i in self.__iter__()
+        ]
 
     def __str__(self):
         return str(tuple(self))
@@ -221,6 +240,7 @@ class Collection(deque, UserDict):
         self.insert(ind, key)
 
     def remove(self, key: str):
+        print(deque(self), key)
         ind = deque.index(self, key)
         deque.__delitem__(self, ind)
         del self.data[key]
@@ -232,7 +252,7 @@ class ChannelQueue(Collection):
     """LIFO container of sound channels."""
 
     def add(self) -> None:
-        channel = Channel(key=None)
+        channel = Channel()
         self.append(channel)
 
 
@@ -289,31 +309,28 @@ class NoteQueue(Collection):
     """LIFO container of AGB notes."""
 
     # yapf: disable
-    def add(self, enable: bool, fmod_channel: int, smp_id: int,
+    def add(self, enable: bool, fmod_channel: int, note_num: int,
             freq: int, velocity: int, parent: int, unk_val: int,
             output: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
-            env_rel: int, wait_ticks: int, patch_num: int,
-            key: str) -> None:
+            env_rel: int, wait_ticks: int, patch_num: int) -> None:
         """Initialize and append a new note."""
         note = Note(
-            key          = key,
             enable       = enable,
             fmod_channel = fmod_channel,
-            note_id      = smp_id,
+            note_num     = note_num,
             freq         = freq,
             velocity     = velocity,
-            patch_num    = patch_num,
             parent       = parent,
-            smp_id       = env_rel,
             unk_val      = unk_val,
             output       = output,
             env_attn     = env_attn,
             env_dcy      = env_dcy,
             env_sus      = env_sus,
             env_rel      = env_rel,
-            wait_ticks   = wait_ticks
+            wait_ticks   = wait_ticks,
+            patch_num    = patch_num
         )
-        self.key_append(note, key)
+        self.append(note)
         # yapf: enable
 
 
@@ -322,6 +339,7 @@ class NoteIDQueue(Collection):
 
     def add(self, note_id: int, key: str) -> None:
         note = NoteID(key=key, note_id=note_id)
+        print(key, note_id)
         self.key_append(note, key)
 
 
@@ -367,7 +385,7 @@ class Channel(NamedTuple):
     key:          str             = str()
     output:       ChannelTypes    = ChannelTypes.NULL
     evt_queue:    EventQueue      = EventQueue()
-    notes:        NoteQueue       = NoteQueue()
+    notes:        NoteIDQueue     = NoteIDQueue()
     subs:         SubroutineQueue = SubroutineQueue()
     # yapf: enable
 
@@ -446,7 +464,7 @@ class Note(NamedTuple):
     env_sus:      int        = int()
     fmod_channel: int        = int()
     freq:         int        = int()
-    note_id:       int        = int()
+    note_num:      int        = int()
     parent:       int        = int()
     patch_num:    int        = int()
     unk_val:      int        = int()

@@ -12,7 +12,7 @@ __all__ = ('fmod', 'FModErrors', 'FSoundOutputTypes', 'FSoundMixerTypes',
            'FSoundReverbChannelProperties', 'FSoundReverbChannelFlags',
            'FSoundFXModes', 'FSoundSpeakerModes', 'FSoundInitModes',
            'FSoundStreamNetStatus', 'FSoundTagFieldType', 'FSoundStatusFlags',
-           'FSoundTOCTag', 'fsound_get_error_string')
+           'FSoundTOCTag', 'fsound_get_error_string', 'fsound_get_error')
 
 FMOD_VERSION = 3.74
 
@@ -29,6 +29,7 @@ class FModErrors(IntEnum):
     FMOD_ERR_PLAY           = auto()
     FMOD_ERR_OUTPUT_FORMAT  = auto()
     FMOD_ERR_COOP_LEVEL     = auto()
+    FMOD_ERR_CREATE_BUFFER  = auto()
     FMOD_ERR_FILE_NOTFOUND  = auto()
     FMOD_ERR_FILE_UNKFORMAT = auto()
     FMOD_ERR_FILE_BAD       = auto()
@@ -304,6 +305,8 @@ FMOD_ERR_MESSAGES = {
     "Soundcard does not support the features needed for this sound system (16bit stereo).",
     e.FMOD_ERR_COOP_LEVEL:
     "Error setting cooperative level for hardware.",
+    e.FMOD_ERR_CREATE_BUFFER:
+    'Error creating hardware sound buffer.',
     e.FMOD_ERR_FILE_NOTFOUND:
     "File not found.",
     e.FMOD_ERR_FILE_UNKFORMAT:
@@ -315,7 +318,7 @@ FMOD_ERR_MESSAGES = {
     e.FMOD_ERR_VERSION:
     "The version number of this file format is not supported.",
     e.FMOD_ERR_INV_PARAM:
-    "An invalid paramters was passed to this function.",
+    "An invalid parameter was passed to this function.",
     e.FMOD_ERR_NO_EAX:
     "Tried to use an EAX command on a non-EAX enabled channel or output.",
     e.FMOD_ERR_CHANNEL_ALLOC:
@@ -336,4 +339,5 @@ def fsound_get_error_string(errcode: int) -> str:
     return msg
 
 
-print()
+def fsound_get_error() -> str:
+    return fsound_get_error_string(fmod.FSOUND_GetError())
