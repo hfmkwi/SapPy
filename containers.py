@@ -241,7 +241,6 @@ class Collection(deque, UserDict):
         self.insert(ind, key)
 
     def remove(self, key: str):
-        print(deque(self), key)
         ind = deque.index(self, key)
         deque.__delitem__(self, ind)
         del self.data[key]
@@ -340,7 +339,6 @@ class NoteIDQueue(Collection):
 
     def add(self, note_id: int, key: str) -> None:
         note = NoteID(key=key, note_id=note_id)
-        print(key, note_id)
         self.key_append(note, key)
 
 

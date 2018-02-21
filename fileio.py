@@ -125,7 +125,6 @@ class File(object):  # pylint: disable=R0902
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
-        print(hex(ptr))
         if ptr < 0x8000000 or ptr > 0x9FFFFFF:
             return -1
         return ptr - 0x8000000
@@ -364,7 +363,9 @@ class File(object):  # pylint: disable=R0902
         self.rd_addr = addr
         out = []
         for __ in range(length):
-            out.append(self.rd_byte())
+            b = self.rd_byte()
+            out.append(b)
+        #out = [i if i != 0 else 32 for i in out]
         out = map(chr, out)
         return ''.join(out)
 
@@ -381,7 +382,6 @@ class File(object):  # pylint: disable=R0902
         """
         self.rd_addr = addr
         ptr = self.rd_ltendian(4, self.rd_addr)
-        print(hex(ptr))
         return self.gba_ptr_to_addr(ptr)
 
 

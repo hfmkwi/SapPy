@@ -4,6 +4,7 @@
 # pylint: disable=W0614
 # TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
+import math
 import os
 import random
 import time
@@ -113,7 +114,6 @@ class Decoder(object):
             for _ in range(256):
                 self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
-            print(self.nse_wavs[1][i])
         self.gbl_vol = 255
 
     @property
@@ -240,7 +240,8 @@ class Decoder(object):
                 self.smp_head = rd_smp_head(1, File.gba_ptr_to_addr(sid))
                 smp: Sample = self.smp_pool[s_sid]
                 if use_readstr:
-                    smp_data = self.wfile.rd_str(smp.size, self.wfile.rd_addr)
+                    smp_data = self.wfile.rd_str(smp_head.size,
+                                                 self.wfile.rd_addr)
                 else:
                     smp_data = self.wfile._file.tell()
                 self.smp_pool[s_sid] = smp._replace(
@@ -331,7 +332,6 @@ class Decoder(object):
                     pc += 2
                 elif c == 0xB2:
                     loop_offset = self.wfile.rd_gba_ptr(self.wfile.rd_addr)
-
                     pc += 5
                     break
                 elif c == 0xB3:
@@ -365,11 +365,9 @@ class Decoder(object):
             while True:
                 self.wfile.rd_addr = pc
                 chan: Channel = self.channels[i]
-                print(loop_offset, pc, chan.loop_ptr)
                 if pc >= loop_offset and chan.loop_ptr == -1 and loop_offset != -1:
                     self.channels[i] = chan._replace(
                         loop_ptr=chan.evt_queue.count + 1)
-                    print(self.channels[i].loop_ptr)
                     chan: Channel = self.channels[i]
                 c = self.wfile.rd_byte()
                 self.log.debug('PGM: %s, CTL: %s', hex(pc), hex(c))
@@ -743,21 +741,25 @@ class Decoder(object):
         quark = 0
         csm = FSoundChannelSampleMode
         sm = FSoundModes
-        for i in range(len(self.smp_pool)):
+        for i in range(len(self.smp_pool) - 1):
             quark += 1
-            smp: Sample = self.smp_pool[i]
+            smp: Sample = self.smp_pool[i + 1]
             self.log.info('#%s - %s - %s', quark, smp.gb_wave, smp.smp_data)
             if smp.gb_wave:
-                if int(smp.smp_data) == 0:
+                try:
+                    val = int(smp.smp_data)
+                except:
+                    val = 0
+                if val == 0:
                     with open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
                     fmod_smp = fmod.FSOUND_Sample_Load(
                         csm.FSOUND_FREE, b'temp.raw', sm.FSOUND_8BITS +
                         sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL +
                         sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0)
-                    print(
-                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
-                    )
+                    #print(
+                    #    f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    #)
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
@@ -769,16 +771,20 @@ class Decoder(object):
                         sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
                         sm.FSOUND_LOOP_NORMAL + sm.FSOUND_MONO +
                         sm.FSOUND_UNSIGNED,
-                        smp.smp_data,
+                        ord(smp.smp_data[0]),
                         smp.size)
-                    print(
-                        f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
-                    )
+                    #print(
+                    #    f'load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    #)
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
             else:
-                if int(smp.smp_data) == 0:
+                try:
+                    val = int(smp.smp_data)
+                except:
+                    val = 0
+                if val == 0:
                     with open_new_file('temp.raw', 2) as f:
                         self.log.debug('writing str %s', smp.smp_data)
                         f.wr_str(smp.smp_data)
@@ -790,9 +796,9 @@ class Decoder(object):
                         if smp.loop else 0 + sm.FSOUND_MONO + sm.FSOUND_SIGNED,
                         0,
                         0)
-                    print(
-                        f'no gbwav temp.raw load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
-                    )
+                    #print(
+                    #    f'no gbwav temp.raw load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    #)
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     self.log.debug('smp %s fmod_smp %s', i,
                                    self.smp_pool[i].fmod_smp)
@@ -801,6 +807,7 @@ class Decoder(object):
                         smp.fmod_smp, smp.loop_start, smp.size - 1)
                     os.remove('temp.raw')
                 else:
+                    print(smp.size)
                     fmod_smp = fmod.FSOUND_Sample_Load(
                         csm.FSOUND_FREE,
                         fpath.encode(encoding='ascii'),
@@ -809,9 +816,9 @@ class Decoder(object):
                         sm.FSOUND_MONO + sm.FSOUND_SIGNED,
                         smp.smp_data,
                         smp.size)
-                    print(
-                        f'no gbwav fpath load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
-                    )
+                    #print(
+                    #    f'no gbwav fpath load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
+                    #)
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(
@@ -927,15 +934,16 @@ class Decoder(object):
         self.ttl_msecs += msecs
         if self.tick_ctr > 0:
             for i in range(32):
-                n: Note = self.note_arr[i]
-                if n.enable and n.wait_ticks > 0:
-                    self.note_arr[i] = n._replace(wait_ticks=n.wait_ticks - (
-                        self.tick_ctr - self.prv_tick))
-                    n: Note = self.note_arr[i]
-                if n.wait_ticks <= 0 and n.enable and not n.note_off:
-                    if not self.channels[n.parent].sustain:
-                        self.note_arr[i] = n._replace(note_off=True)
-                    n: Note = self.note_arr[i]
+                note: Note = self.note_arr[i]
+                if note.enable and note.wait_ticks > 0:
+                    self.note_arr[i] = note._replace(
+                        wait_ticks=note.wait_ticks -
+                        (self.tick_ctr - self.prv_tick))
+                    note: Note = self.note_arr[i]
+                if note.wait_ticks <= 0 and note.enable and not note.note_off:
+                    if not self.channels[note.parent].sustain:
+                        self.note_arr[i] = note._replace(note_off=True)
+                    note: Note = self.note_arr[i]
             for i in range(len(self.channels)):
                 if not self.channels[i].enable:
                     continue
@@ -999,19 +1007,20 @@ class Decoder(object):
                         self.channels[i] = chan._replace(
                             main_vol=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
-                        for n in chan.notes:
-                            n: Note = self.note_arr[n.note_id]
-                            if n.enable and n.parent == i:
-                                dav = (n.velocity / 0x7F) * (
+                        for note in chan.notes:
+                            note: Note = self.note_arr[note.note_id]
+                            if note.enable and note.parent == i:
+                                dav = (note.velocity / 0x7F) * (
                                     chan.main_vol / 0x7F) * (
-                                        int(n.env_pos) / 0xFF * 255)
+                                        int(note.env_pos) / 0xFF * 255)
                                 if mutethis:
                                     dav = 0
-                                fmod.FSOUND_SetVolume(n.fmod_channel, dav * 0
-                                                      if chan.mute else 1)
+                                fmod.FSOUND_SetVolume(
+                                    note.fmod_channel,
+                                    c_float(dav * 0 if chan.mute else dav * 1))
                                 self.log.debug(
                                     'CMD 0xBE set vol chan %s err: %s',
-                                    n.fmod_channel, fsound_get_error())
+                                    note.fmod_channel, fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
@@ -1019,14 +1028,14 @@ class Decoder(object):
                         self.channels[i] = chan._replace(
                             panning=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
-                        for n in chan.notes:
-                            n: Note = self.note_arr[n.note_id]
-                            if n.enable and n.parent == i:
-                                fmod.FSOUND_SetPan(n.fmod_channel,
+                        for note in chan.notes:
+                            note: Note = self.note_arr[note.note_id]
+                            if note.enable and note.parent == i:
+                                fmod.FSOUND_SetPan(note.fmod_channel,
                                                    chan.panning * 2)
                                 self.log.debug(
                                     'CMD 0xBF set pan chan %s err; %s',
-                                    n.fmod_channel, fsound_get_error())
+                                    note.fmod_channel, fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
@@ -1035,16 +1044,16 @@ class Decoder(object):
                             pgm_ctr=chan.pgm_ctr + 1,
                             pitch=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
-                        for n in chan.notes:
-                            n: Note = self.note_arr[n.note_id]
-                            if n.enable and n.parent == i:
+                        for note in chan.notes:
+                            note: Note = self.note_arr[note.note_id]
+                            if note.enable and note.parent == i:
+                                freq = c_float(27.5 * 2**
+                                               ((chan.pitch - 21) / 12))
                                 fmod.FSOUND_SetFrequency(
-                                    n.fmod_channel, n.freq * 2**(1 / 12)**
-                                    ((chan.pitch - 0x40
-                                     ) / 0x40 * chan.pitch_range))
+                                    note.fmod_channel, freq)
                                 self.log.debug(
                                     'CMD 0xC0 set freq chan %s note %s err: %s',
-                                    n.fmod_channel, n.note_id,
+                                    note.fmod_channel, note.note_id,
                                     fsound_get_error())
                     elif cmd == 0xC1:
                         self.channels[i] = chan._replace(
@@ -1052,16 +1061,16 @@ class Decoder(object):
                             pitch_range=sbyte_to_int(
                                 chan.evt_queue[chan.pgm_ctr].arg1))
                         chan: Channel = self.channels[i]
-                        for n in chan.notes:
-                            n: Note = self.note_arr[n.note_id]
-                            if n.enable and n.parent == i:
+                        for note in chan.notes:
+                            note: Note = self.note_arr[note.note_id]
+                            if note.enable and note.parent == i:
+                                freq = c_float(27.5 * 2**
+                                               ((chan.pitch - 21) / 12))
                                 fmod.FSOUND_SetFrequency(
-                                    n.fmod_channel, n.freq * 2**(1 / 12)**
-                                    ((chan.pitch - 0x40
-                                     ) / 0x40 * chan.pitch_range))
+                                    note.fmod_channel, freq)
                                 self.log.debug(
                                     'CMD 0xC0 set freq chan %s note %s err: %s',
-                                    n.fmod_channel, n.note_id,
+                                    note.fmod_channel, note.note_id,
                                     fsound_get_error())
                     elif cmd == 0xC2:
                         self.channels[i] = chan._replace(
@@ -1074,14 +1083,11 @@ class Decoder(object):
                             vib_rate=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
                     elif cmd == 0xCE:
-                        for note in chan.notes:
-                            print(chan.notes, self.note_arr.data)
-                            n: Note = self.note_arr[note.note_id]
-                            self.log.debug('Note: %s', n)
-                            if n.enable and not n.note_off:
-                                self.note_arr[note.note_id] = n._replace(
+                        for item in chan.notes:
+                            temp: Note = self.note_arr[item.note_id]
+                            if temp.enable and not temp.note_off:
+                                self.note_arr[item.note_id] = temp._replace(
                                     note_off=True)
-                                n: Note = self.note_arr[note.note_id]
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1, sustain=False)
                         chan: Channel = self.channels[i]
@@ -1148,24 +1154,25 @@ class Decoder(object):
                 clear_channel: List[bool] = [
                     bool() for i in range(len(self.channels))
                 ]
-                for n in self.note_q:
-                    n: Note
+                for i in range(len(self.note_q)):
+                    note: Note = self.note_q[i]
                     x = self.free_note()
                     if x < 32:
-                        self.note_arr[x] = n
-                        chan: Channel = self.channels[n.parent]
-                        if not clear_channel[n.parent]:
-                            clear_channel[n.parent] = True
-                            for note2 in self.channels[n.parent].notes:
-                                n: Note = self.note_arr[note2.note_id]
-                                if n.enable and not n.note_off:
-                                    self.note_arr[note2.note_id] = n._replace(
-                                        note_off=True)
-                                    n: Note = self.note_arr[note2.note_id]
-                        self.channels[n.parent].notes.add(x, str(x))
-                        chan: Channel = self.channels[n.parent]
-                        pat = n.patch_num
-                        nn = n.note_num
+                        self.note_arr[x] = note
+                        chan: Channel = self.channels[note.parent]
+                        if not clear_channel[note.parent]:
+                            clear_channel[note.parent] = True
+                            for note2 in self.channels[note.parent].notes:
+                                note3: Note = self.note_arr[note2.note_id]
+                                if note3.enable and not note3.note_off:
+                                    self.note_arr[
+                                        note2.note_id] = note3._replace(
+                                            note_off=True)
+                                    note3: Note = self.note_arr[note2.note_id]
+                        self.channels[note.parent].notes.add(x, str(x))
+                        chan: Channel = self.channels[note.parent]
+                        pat = note.patch_num
+                        nn = note.note_num
                         s_pat = str(pat)
                         s_nn = str(nn)
                         # n: Note = self.note_arr[x]
@@ -1175,14 +1182,14 @@ class Decoder(object):
                         das = 0
                         if self.dct_exists(self.directs, pat):
                             dct: Direct = self.directs[s_pat]
-                            n: Note = self.note_arr[x]
-                            self.note_arr[x] = n._replace(
+                            note: Note = self.note_arr[x]
+                            self.note_arr[x] = note._replace(
                                 output=NoteTypes(dct.output),
                                 env_attn=dct.env_attn,
                                 env_dcy=dct.env_dcy,
                                 env_sus=dct.env_sus,
                                 env_rel=dct.env_rel)
-                            n: Note = self.note_arr[x]
+                            note: Note = self.note_arr[x]
                             if dct.output in std_out:
                                 das = str(dct.smp_id)
                                 daf = note_to_freq(nn + (60 - dct.drum_key), -1
@@ -1201,8 +1208,8 @@ class Decoder(object):
                         elif self.inst_exists(pat):
                             dct: Direct = self.insts[s_pat].directs[str(
                                 self.insts[s_pat].kmaps[s_nn].assign_dct)]
-                            n: Note = self.note_arr[x]
-                            self.note_arr[x] = n._replace(
+                            note: Note = self.note_arr[x]
+                            self.note_arr[x] = note._replace(
                                 output=NoteTypes(dct.output),
                                 env_attn=dct.env_attn,
                                 env_dcy=dct.env_dcy,
@@ -1223,8 +1230,8 @@ class Decoder(object):
                                 das = ''
                         elif self.drm_exists(pat):
                             dct: Direct = self.drmkits[s_pat].directs[s_nn]
-                            n: Note = self.note_arr[x]
-                            self.note_arr[x] = n._replace(
+                            note: Note = self.note_arr[x]
+                            self.note_arr[x] = note._replace(
                                 output=NoteTypes(dct.output),
                                 env_attn=dct.env_attn,
                                 env_dcy=dct.env_dcy,
@@ -1253,7 +1260,7 @@ class Decoder(object):
 
                         if das != '':
                             daf *= (2**(1 / 12))**self.transpose
-                            dav = (n.velocity / 0x7F) * ((
+                            dav = (note.velocity / 0x7F) * ((
                                 chan.main_vol / 0x7F) * 255)
                             if mutethis:
                                 dav = 0
@@ -1311,41 +1318,44 @@ class Decoder(object):
                                         str(self.gb4_chan))
                                 self.gb4_chan = x
 
-                            n: Note = self.note_arr[x]
+                            note: Note = self.note_arr[x]
                             if self.output == SongTypes.WAVE:
-                                for i in self.smp_pool.data.items():
-                                    print(i)
-                                out = fmod.FSOUND_PlaySound(
-                                    x + 1, self.smp_pool[das].fmod_smp)
-
+                                if not mutethis:
+                                    out = x + 1
+                                    p = fmod.FSOUND_PlaySound(
+                                        x + 1, self.smp_pool[das].fmod_smp)
+                                    self.note_arr[x] = self.note_arr[
+                                        x]._replace(fmod_channel=out)
+                                else:
+                                    x = x
                                 self.log.debug(
                                     'Play sound das %s chan %s smp %s err: %s',
                                     hex(int(das)), x + 1,
-                                    self.smp_pool[das].fmod_smp,
-                                    fsound_get_error())
-                                self.note_arr[x] = self.note_arr[x]._replace(
-                                    fmod_channel=out)
+                                    self.smp_pool[das].key, fsound_get_error())
                             else:
                                 self.note_arr[x] = self.note_arr[x]._replace(
-                                    fmod_channel=n.parent + 1)
+                                    fmod_channel=note.parent)
                             self.note_arr[x] = self.note_arr[x]._replace(
                                 freq=daf, phase=NotePhases.INITIAL)
-                            n: Note = self.note_arr[x]
-                            chan: Channel = self.channels[n.parent]
+                            note: Note = self.note_arr[x]
+                            chan: Channel = self.channels[note.parent]
                             if self.output == SongTypes.WAVE:
-                                freq = c_float((daf * 2**(1 / 12))
-                                               **((chan.pitch - 0x40) / 0x40 *
-                                                  chan.pitch_range))
-                                fmod.FSOUND_SetFrequency(n.fmod_channel, freq)
+                                freq = c_float(27.5 * 2**
+                                               ((chan.pitch - 21) / 12))
+                                fmod.FSOUND_SetFrequency(
+                                    note.fmod_channel,
+                                    c_float(daf * (2**(1 / 12))**
+                                            ((chan.pitch - 0x40
+                                             ) / 0x40 * chan.pitch_range)))
                                 self.log.debug(
                                     'Set frequency chan: %s freq: %s err: %s',
-                                    n.fmod_channel, freq, fsound_get_error())
-                                vol = dav * 0 if chan.mute else 1
-                                fmod.FSOUND_SetVolume(n.fmod_channel, vol)
+                                    note.fmod_channel, freq, fsound_get_error())
+                                vol = c_float(dav * 0 if chan.mute else dav * 1)
+                                fmod.FSOUND_SetVolume(note.fmod_channel, vol)
                                 self.log.debug(
                                     'Set volume: %s chan: %s err: %s', vol,
-                                    n.fmod_channel, fsound_get_error())
-                                fmod.FSOUND_SetPan(n.fmod_channel,
+                                    note.fmod_channel, fsound_get_error())
+                                fmod.FSOUND_SetPan(note.fmod_channel,
                                                    chan.panning * 2)
                             # TODO: RaiseEvent PlayedANote
             self.note_q.clear()
@@ -1353,110 +1363,116 @@ class Decoder(object):
             if self.note_f_ctr > 0:
                 for i in range(32):
                     if self.note_arr[i].enable:
-                        n: Note = self.note_arr[i]
-                        if n.output == NoteTypes.DIRECT:
-                            if n.note_off and n.phase < NotePhases.RELEASE:
-                                self.note_arr[i] = n._replace(
+                        note: Note = self.note_arr[i]
+                        if note.output == NoteTypes.DIRECT:
+                            if note.note_off and note.phase < NotePhases.RELEASE:
+                                self.note_arr[i] = note._replace(
                                     env_step=0, phase=NotePhases.RELEASE)
-                            n: Note = self.note_arr[i]
-                            if not n.env_step or (n.env_pos == n.env_dest) or (
-                                    not n.env_step and (n.env_pos <= n.env_dest)
-                            ) or (n.env_step >= 0 and n.env_pos >= n.env_dest):
-                                phase = n.phase
+                            note: Note = self.note_arr[i]
+                            if not note.env_step or (
+                                    note.env_pos == note.env_dest) or (
+                                        not note.env_step and
+                                        (note.env_pos <= note.env_dest)) or (
+                                            note.env_step >= 0 and
+                                            note.env_pos >= note.env_dest):
+                                phase = note.phase
                                 if phase == NotePhases.INITIAL:
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         phase=NotePhases.ATTACK,
                                         env_pos=0,
                                         env_dest=255,
-                                        env_step=n.env_attn)
-                                    n: Note = self.note_arr[i]
+                                        env_step=note.env_attn)
+                                    note: Note = self.note_arr[i]
                                 elif phase == NotePhases.ATTACK:
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         phase=NotePhases.DECAY,
-                                        env_dest=n.env_sus,
-                                        env_step=(n.env_dcy - 0x100) / 2)
-                                    n: Note = self.note_arr[i]
+                                        env_dest=note.env_sus,
+                                        env_step=(note.env_dcy - 0x100) / 2)
+                                    note: Note = self.note_arr[i]
                                 elif phase == NotePhases.DECAY:
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         phase=NotePhases.SUSTAIN, env_step=0)
-                                    n: Note = self.note_arr[i]
+                                    note: Note = self.note_arr[i]
                                 elif phase == NotePhases.SUSTAIN:
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         phase=NotePhases.SUSTAIN, env_step=0)
-                                    n: Note = self.note_arr[i]
+                                    note: Note = self.note_arr[i]
                                 elif phase == NotePhases.RELEASE:
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         phase=NotePhases.NOTEOFF,
                                         env_dest=0,
-                                        env_step=n.env_rel - 0x100)
-                                    n: Note = self.note_arr[i]
+                                        env_step=note.env_rel - 0x100)
+                                    note: Note = self.note_arr[i]
                                 elif phase == NotePhases.NOTEOFF:
-                                    fmod.FSOUND_StopSound(n.fmod_channel)
+                                    fmod.FSOUND_StopSound(note.fmod_channel)
                                     self.log.debug('Stop sound chan %r err: %s',
-                                                   n.fmod_channel + 1,
+                                                   note.fmod_channel + 1,
                                                    fsound_get_error())
-                                    self.note_arr[i] = n._replace(
+                                    self.note_arr[i] = note._replace(
                                         fmod_channel=0, enable=False)
-                                    n: Note = self.note_arr[i]
-                                    print(i)
-                                    self.channels[n.parent].notes.remove(str(i))
-                                n: Note = self.note_arr[i]
-                        n: Note = self.note_arr[i]
-                        nex = n.env_pos + n.env_step
-                        if nex > n.env_dest and n.env_step > 0:
-                            nex = n.env_dest
-                        if nex < n.env_dest and n.env_step < 0:
-                            nex = n.env_dest
-                        self.note_arr[i] = n._replace(env_pos=nex)
-                        n: Note = self.note_arr[i]
-                        dav = (n.velocity / 0x7F) * (
-                            self.channels[n.parent].main_vol / 0x7F) * (
-                                int(n.env_pos) / 0xFF) * 255
+                                    note: Note = self.note_arr[i]
+                                    self.channels[note.parent].notes.remove(
+                                        str(i))
+                                note: Note = self.note_arr[i]
+                        note: Note = self.note_arr[i]
+                        nex = note.env_pos + note.env_step
+                        if nex > note.env_dest and note.env_step > 0:
+                            nex = note.env_dest
+                        if nex < note.env_dest and note.env_step < 0:
+                            nex = note.env_dest
+                        self.note_arr[i] = note._replace(env_pos=nex)
+                        note: Note = self.note_arr[i]
+                        dav = (note.velocity / 0x7F) * (
+                            self.channels[note.parent].main_vol / 0x7F) * (
+                                int(note.env_pos) / 0xFF) * 255
                         if mutethis:
                             dav = 0
-                        fmod.FSOUND_SetVolume(n.fmod_channel, dav * 0
-                                              if self.channels[n.parent].mute
-                                              else 1)
+                        fmod.FSOUND_SetVolume(
+                            note.fmod_channel,
+                            c_float(dav * 0 if self.channels[note.parent].mute
+                                    else dav * 1))
                         self.log.debug('Set chan %s vol err: %s',
-                                       n.fmod_channel, fsound_get_error())
+                                       note.fmod_channel, fsound_get_error())
                     else:
-                        if n.note_off and n.phase < NotePhases.RELEASE:
-                            self.note_arr[i] = n._replace(
+                        if note.note_off and note.phase < NotePhases.RELEASE:
+                            self.note_arr[i] = note._replace(
                                 env_step=0, phase=NotePhases.RELEASE)
-                        n: Note = self.note_arr[i]
-                        if not n.env_step or n.env_pos == n.env_dest or (
-                                not n.env_step and n.env_pos <= n.env_dest
-                        ) or (n.env_step >= 0 and n.env_pos >= n.env_dest):
-                            phase: NotePhases = n.phase
+                        note: Note = self.note_arr[i]
+                        if not note.env_step or note.env_pos == note.env_dest or (
+                                not note.env_step and
+                                note.env_pos <= note.env_dest) or (
+                                    note.env_step >= 0 and
+                                    note.env_pos >= note.env_dest):
+                            phase: NotePhases = note.phase
                             if phase == NotePhases.INITIAL:
-                                self.note_arr[i] = n._replace(
+                                self.note_arr[i] = note._replace(
                                     phase=NotePhases.ATTACK,
                                     env_pos=0,
                                     env_dest=255,
-                                    env_step=0x100 - n.env_attn * 8)
-                                n: Note = self.note_arr[i]
+                                    env_step=0x100 - note.env_attn * 8)
+                                note: Note = self.note_arr[i]
                             elif phase == NotePhases.ATTACK:
-                                self.note_arr[i] = n._replace(
+                                self.note_arr[i] = note._replace(
                                     phase=NotePhases.DECAY,
-                                    env_dest=n.env_sus,
-                                    env_step=-(n.env_dcy) * 2)
-                                n: Note = self.note_arr[i]
+                                    env_dest=note.env_sus,
+                                    env_step=-(note.env_dcy) * 2)
+                                note: Note = self.note_arr[i]
                             elif phase == NotePhases.DECAY:
-                                self.note_arr[i] = n._replace(
+                                self.note_arr[i] = note._replace(
                                     phase=NotePhases.SUSTAIN, env_step=0)
-                                n: Note = self.note_arr[i]
+                                note: Note = self.note_arr[i]
                             elif phase == NotePhases.SUSTAIN:
-                                self.note_arr[i] = n._replace(
+                                self.note_arr[i] = note._replace(
                                     phase=NotePhases.SUSTAIN, env_step=0)
-                                n: Note = self.note_arr[i]
+                                note: Note = self.note_arr[i]
                             elif phase == NotePhases.RELEASE:
-                                self.note_arr[i] = n._replace(
+                                self.note_arr[i] = note._replace(
                                     phase=NotePhases.NOTEOFF,
                                     env_dest=0,
-                                    env_step=(0x08 - n.env_rel))
-                                n: Note = self.note_arr[i]
+                                    env_step=(0x08 - note.env_rel))
+                                note: Note = self.note_arr[i]
                             elif phase == NotePhases.NOTEOFF:
-                                out_type = n.output
+                                out_type = note.output
                                 if out_type == NoteTypes.SQUARE1:
                                     self.gb1_chan = 255
                                 elif out_type == NoteTypes.SQUARE2:
@@ -1465,36 +1481,38 @@ class Decoder(object):
                                     self.gb3_chan = 255
                                 elif out_type == NoteTypes.NOISE:
                                     self.gb4_chan = 255
-                                fmod.FSOUND_StopSound(n.fmod_channel)
+                                fmod.FSOUND_StopSound(note.fmod_channel)
                                 self.log.debug(
                                     'Stop sound from NOTEOFF %s err: %s',
-                                    n.fmod_channel, fsound_get_error())
-                                self.note_arr[i] = n._replace(
+                                    note.fmod_channel, fsound_get_error())
+                                self.note_arr[i] = note._replace(
                                     fmod_channel=0, enable=False)
-                                n: Note = self.note_arr[i]
+                                note: Note = self.note_arr[i]
                                 try:
-                                    self.channels[n.parent].notes.remove(str(i))
+                                    self.channels[note.parent].notes.remove(
+                                        str(i))
                                 except:
                                     pass
-                            n: Note = self.note_arr[i]
-                        n: Note = self.note_arr[i]
-                        nex = n.env_pos + n.env_step
-                        if nex > n.env_dest and n.env_step > 0:
-                            nex = n.env_dest
-                        if nex < n.env_dest and n.env_step > 0:
-                            nex = n.env_dest
-                        self.note_arr[i] = n._replace(env_pos=nex)
-                        n: Note = self.note_arr[i]
-                        dav = (n.velocity / 0x7F) * (
-                            self.channels[n.parent].main_vol / 0x7F) * (
-                                int(n.env_pos) / 0xFF) * 255
+                            note: Note = self.note_arr[i]
+                        note: Note = self.note_arr[i]
+                        nex = note.env_pos + note.env_step
+                        if nex > note.env_dest and note.env_step > 0:
+                            nex = note.env_dest
+                        if nex < note.env_dest and note.env_step > 0:
+                            nex = note.env_dest
+                        self.note_arr[i] = note._replace(env_pos=nex)
+                        note: Note = self.note_arr[i]
+                        dav = (note.velocity / 0x7F) * (
+                            self.channels[note.parent].main_vol / 0x7F) * (
+                                int(note.env_pos) / 0xFF) * 255
                         if mutethis:
                             dav = 0
-                        vol = c_float(dav * 0
-                                      if self.channels[n.parent].mute else 1)
-                        fmod.FSOUND_SetVolume(n.fmod_channel, vol)
+                        vol = c_float(dav * 0 if self.channels[note.parent].mute
+                                      else dav * 1)
+                        fmod.FSOUND_SetVolume(note.fmod_channel, vol)
                         self.log.debug('Set volume chan %s vol %s err: %s',
-                                       n.fmod_channel, vol, fsound_get_error())
+                                       note.fmod_channel, vol,
+                                       fsound_get_error())
 
             xmmm = False
             for i in range(len(self.channels)):
@@ -1529,15 +1547,16 @@ def main():
     """Main test method."""
     import time
     d = Decoder()
-    d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x8F2C0)
-    l = len(d.channels)
-    for i in range(40):
+
+    d.play_song(
+        'C:\\Users\\chenc\\Downloads\\Metroid - Zero Mission (U) [!]\\Metroid - Zero Mission (U) [!].gba',
+        1, 0x8F2C0)
+    while True:
         d.evt_processor_timer(1)
         fmod.FSOUND_Update()
         print(fsound_get_error(), d.note_f_ctr, d.ttl_msecs, d.tick_ctr,
               d.ttl_ticks)
-        assert l == len(d.channels)
-        time.sleep(0.1)
+        time.sleep(0.001)
     fmod.FSOUND_Close()
 
 
