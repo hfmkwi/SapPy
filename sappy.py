@@ -7,12 +7,13 @@
 import math
 import os
 import random
+import string
 import time
 from ctypes import *
 from enum import IntEnum
 from logging import INFO, basicConfig, getLogger
 from struct import unpack
-from typing import List, NamedTuple
+from typing import List, NamedTuple, Union
 
 from containers import *
 from fileio import *
@@ -77,7 +78,7 @@ class Decoder(object):
         self.transpose:    int                         = int()
         self._gbl_vol:     int                         = 100
         self.note_f_ctr:   float                       = float()
-        self.prv_tick:     float                       = float()
+        self.last_tick:     float                       = float()
         self.tick_ctr:     float                       = float()
         self.rip_ears:     list                        = list()
         self.mdrum_map:    list                        = list()
@@ -126,20 +127,37 @@ class Decoder(object):
         self._gbl_vol = vol
         fmod.FSOUND_SetSFXMasterVolume(self._gbl_vol)
 
-    @staticmethod
-    def dct_exists(dcts: DirectQueue, dct_id: int) -> bool:
+    def dct_exists(self, dcts: DirectQueue, dct_id: int) -> bool:
         """Check if a direct exists in a specfied `DirectQueue`."""
-        return str(dct_id) in dcts
+        for dct in dcts:
+            if self.val(dct.key) == dct_id:
+                return True
+        return False
 
     @staticmethod
     def flip_lng(val: int) -> int:
         """Truncate and flip the byteorder of a 4 byte integer."""
-        return int.from_bytes(val.to_bytes(4, 'big'), 'little')
+        b = [str() for i in range(4)]
+        s1 = (list('00000000') + list(hex(val)[2:]))[-8:]
+        b[0] = s1[0:2]
+        b[1] = s1[2:4]
+        b[2] = s1[4:6]
+        b[3] = s1[6:8]
+        s2 = ''.join(b)
+        return eval('0x' + s2)
 
     @staticmethod
     def flip_int(val: int) -> int:
         """Truncate and flip the byteorder of a 2 byte integer."""
-        return int.from_bytes(val.to_bytes(2, 'big'), 'little')
+        b1 = value % 0x100
+        value //= 0x100
+        b2 = value % 0x100
+
+        value = b1
+        value *= 0x100
+        value += b2
+
+        return value
 
     @staticmethod
     def set_direct(queue: DirectQueue, dct_key: str,
@@ -206,7 +224,10 @@ class Decoder(object):
 
     def drm_exists(self, patch: int) -> bool:
         """Check if a drumkit on the specified MIDI patch exists."""
-        return str(patch) in self.drmkits
+        for drm in self.drmkits:
+            if self.val(drm.key) == patch:
+                return True
+        return False
 
     def free_note(self) -> int:
         """Get a free note number.
@@ -258,12 +279,17 @@ class Decoder(object):
 
     def inst_exists(self, patch: int) -> bool:
         """Check if an instrument on the specified MIDI patch is defined."""
-        return str(patch) in self.insts
+        for inst in self.insts:
+            if self.val(inst.key) == patch:
+                return True
+        return False
 
-    @staticmethod
     def kmap_exists(kmaps: KeyMapQueue, kmap_id: int) -> bool:
         """Check if a keymap is defined."""
-        return str(kmap_id) in kmaps
+        for kmap in kmaps:
+            if self.val(kmap.key) == kmap_id:
+                return True
+        return True
 
     def note_in_channel(self, note_id: bytes, chnl_id: int) -> bool:
         """Check if a note belongs to a channel."""
@@ -271,8 +297,16 @@ class Decoder(object):
 
     def patch_exists(self, lp: int) -> bool:
         """UKNOWN"""
-        lp = str(lp)
-        return lp in self.directs or self.inst_exists(lp) or self.drm_exists(lp)
+        for dct in self.directs:
+            if self.val(dct.key) == lp:
+                return True
+        for inst in self.insts:
+            if self.val(inst.key) == lp:
+                return True
+        for dk in self.drmkits:
+            if self.val(dk.key) == lp:
+                return True
+        return False
 
     # yapf: disable
     def play_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None,
@@ -744,13 +778,9 @@ class Decoder(object):
         for i in range(len(self.smp_pool) - 1):
             quark += 1
             smp: Sample = self.smp_pool[i + 1]
-            self.log.info('#%s - %s - %s', quark, smp.gb_wave, smp.smp_data)
+            self.log.info('#%s - %s - %s', quark, smp.gb_wave, 0)
             if smp.gb_wave:
-                try:
-                    val = int(smp.smp_data)
-                except:
-                    val = 0
-                if val == 0:
+                if self.val(smp.smp_data) == 0:
                     with open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
                     fmod_smp = fmod.FSOUND_Sample_Load(
@@ -763,7 +793,7 @@ class Decoder(object):
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
-                    os.remove('temp.raw')
+                    #os.remove('temp.raw')
                 else:
                     fmod_smp = fmod.FSOUND_Sample_Load(
                         csm.FSOUND_FREE,
@@ -780,13 +810,8 @@ class Decoder(object):
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(smp.fmod_smp, 0, 31)
             else:
-                try:
-                    val = int(smp.smp_data)
-                except:
-                    val = 0
-                if val == 0:
+                if self.val(smp.smp_data) == 0:
                     with open_new_file('temp.raw', 2) as f:
-                        self.log.debug('writing str %s', smp.smp_data)
                         f.wr_str(smp.smp_data)
                     fmod_smp = fmod.FSOUND_Sample_Load(
                         csm.FSOUND_FREE,
@@ -800,14 +825,14 @@ class Decoder(object):
                     #    f'no gbwav temp.raw load smp: {fmod_smp} err: {fsound_get_error_string(fmod.FSOUND_GetError())}'
                     #)
                     self.smp_pool[i] = smp._replace(fmod_smp=fmod_smp)
-                    self.log.debug('smp %s fmod_smp %s', i,
-                                   self.smp_pool[i].fmod_smp)
+                    self.log.debug('no gbwav smp: %s fmod_smp: %s err: %s',
+                                   i, self.smp_pool[i].fmod_smp,
+                                   fsound_get_error())
                     smp: Sample = self.smp_pool[i]
                     fmod.FSOUND_Sample_SetLoopPoints(
                         smp.fmod_smp, smp.loop_start, smp.size - 1)
                     os.remove('temp.raw')
                 else:
-                    print(smp.size)
                     fmod_smp = fmod.FSOUND_Sample_Load(
                         csm.FSOUND_FREE,
                         fpath.encode(encoding='ascii'),
@@ -907,9 +932,12 @@ class Decoder(object):
         self.beats = 0
         print('Done')
 
-    def smp_exists(self, note_id: int) -> bool:
+    def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
-        return str(note_id) in self.smp_pool
+        for smp in self.smp_pool:
+            if self.val(smp.key) == smp_id:
+                return True
+        return False
 
     def set_mpatch_map(self, ind: int, inst: int, transpose: int) -> None:
         """Bind a MIDI instrument to a specified MIDI key."""
@@ -934,20 +962,22 @@ class Decoder(object):
         self.ttl_msecs += msecs
         if self.tick_ctr > 0:
             for i in range(32):
-                note: Note = self.note_arr[i]
+                # BEGIN WITH --------------------------------------------------
+                note: Note = self.note_arr[i]  # WITH STATEMENT
                 if note.enable and note.wait_ticks > 0:
                     self.note_arr[i] = note._replace(
                         wait_ticks=note.wait_ticks -
-                        (self.tick_ctr - self.prv_tick))
+                        (self.tick_ctr - self.last_tick))
                     note: Note = self.note_arr[i]
                 if note.wait_ticks <= 0 and note.enable and not note.note_off:
                     if not self.channels[note.parent].sustain:
                         self.note_arr[i] = note._replace(note_off=True)
-                    note: Note = self.note_arr[i]
+                # END WITH ----------------------------------------------------
             for i in range(len(self.channels)):
                 if not self.channels[i].enable:
                     continue
-                chan: Channel = self.channels[i]
+                # BEGIN WITH --------------------------------------------------
+                chan: Channel = self.channels[i]  # WITH STATEMENT
                 for ep in range(len(self.rip_ears)):
                     if self.rip_ears[ep] == chan.patch_num:
                         self.channels[i] = chan._replace(mute=True)
@@ -956,40 +986,33 @@ class Decoder(object):
                 if chan.wait_ticks > 0:
                     self.channels[i] = chan._replace(
                         wait_ticks=chan.wait_ticks -
-                        (self.tick_ctr - self.prv_tick))
-                    chan: Channel = self.channels[i]
+                        (self.tick_ctr - self.last_tick))
                 chan: Channel = self.channels[i]
                 in_for = True
-                looped = False
+                just_looped = False
                 self.log.debug('Channel wait_ticks: %s', chan.wait_ticks)
                 while chan.wait_ticks <= 0:
-                    chan: Channel = self.channels[i]
-                    cmd = chan.evt_queue[chan.pgm_ctr].cmd_byte
-                    self.log.debug('PGM: %s, CMD: %s', hex(chan.pgm_ctr),
-                                   hex(cmd))
-                    if cmd == 0xB1:
+                    cmd_byte = chan.evt_queue[chan.pgm_ctr].cmd_byte
+                    self.log.debug('EVT QUEUE PGM: %s CMD: %s', hex(
+                        chan.pgm_ctr), hex(cmd_byte))
+                    if cmd_byte == 0xB1:
                         self.channels[i] = chan._replace(enable=False)
                         self.log.debug('Disabled channel %s', i)
-                        chan: Channel = self.channels[i]
                         in_for = False
                         break
-                    elif cmd == 0xB9:
+                    elif cmd_byte == 0xB9:
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xBB:
+                    elif cmd_byte == 0xBB:
                         self.tempo = chan.evt_queue[chan.pgm_ctr].arg1 * 2
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xBC:
+                    elif cmd_byte == 0xBC:
                         self.channels[i] = chan._replace(
                             transpose=sbyte_to_int(
                                 chan.evt_queue[chan.pgm_ctr].arg1),
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xBD:
-                        pn = chan.evt_queue[chan.pgm_ctr].arg1
+                    elif cmd_byte == 0xBD:
                         if self.dct_exists(self.directs, chan.patch_num):
                             out_type = self.directs[str(chan.patch_num)].output
                         elif self.inst_exists(chan.patch_num):
@@ -999,119 +1022,139 @@ class Decoder(object):
                         else:
                             out_type = ChannelTypes.NULL
                         self.channels[i] = chan._replace(
-                            patch_num=pn,
+                            patch_num=chan.evt_queue[chan.pgm_ctr].arg1,
                             output=out_type,
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xBE:
+                    elif cmd_byte == 0xBE:
                         self.channels[i] = chan._replace(
                             main_vol=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
                         for note in chan.notes:
-                            note: Note = self.note_arr[note.note_id]
-                            if note.enable and note.parent == i:
-                                dav = (note.velocity / 0x7F) * (
-                                    chan.main_vol / 0x7F) * (
-                                        int(note.env_pos) / 0xFF * 255)
+                            note: Note
+                            if self.note_arr[note.
+                                             note_id].enable and self.note_arr[note.
+                                                                               note_id].parent == i:
+                                dav = (
+                                    self.note_arr[note.note_id].velocity / 0x7F
+                                ) * (chan.main_vol / 0x7F) * ((
+                                    int(note.env_pos) / 0xFF) * 255)
                                 if mutethis:
                                     dav = 0
                                 fmod.FSOUND_SetVolume(
-                                    note.fmod_channel,
+                                    self.note_arr[note.note_id].fmod_channel,
                                     c_float(dav * 0 if chan.mute else dav * 1))
                                 self.log.debug(
-                                    'CMD 0xBE set vol chan %s err: %s',
-                                    note.fmod_channel, fsound_get_error())
+                                    'CMD 0xBE set vol: %s chan: %s err: %s',
+                                    dav,
+                                    self.note_arr[note.note_id].fmod_channel,
+                                    fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xBF:
+                    elif cmd_byte == 0xBF:
                         self.channels[i] = chan._replace(
                             panning=chan.evt_queue[chan.pgm_ctr].arg1)
                         chan: Channel = self.channels[i]
                         for note in chan.notes:
-                            note: Note = self.note_arr[note.note_id]
-                            if note.enable and note.parent == i:
-                                fmod.FSOUND_SetPan(note.fmod_channel,
-                                                   chan.panning * 2)
+                            note: Note
+                            if self.note_arr[note.
+                                             note_id].enable and self.note_arr[note.
+                                                                               note_id].parent == i:
+                                fmod.FSOUND_SetPan(
+                                    self.note_arr[note.note_id].fmod_channel,
+                                    chan.panning * 2)
                                 self.log.debug(
-                                    'CMD 0xBF set pan chan %s err; %s',
-                                    note.fmod_channel, fsound_get_error())
+                                    'CMD 0xBF set pan: %s chan: %s err: %s',
+                                    chan.panning * 2,
+                                    self.note_arr[note.note_id].fmod_channel,
+                                    fsound_get_error())
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xC0:
+                    elif cmd_byte == 0xC0:
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.pgm_ctr + 1,
-                            pitch=chan.evt_queue[chan.pgm_ctr].arg1)
+                            pitch_bend=chan.evt_queue[chan.pgm_ctr].arg1,
+                            pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
                         for note in chan.notes:
-                            note: Note = self.note_arr[note.note_id]
-                            if note.enable and note.parent == i:
-                                freq = c_float(27.5 * 2**
-                                               ((chan.pitch - 21) / 12))
+                            note: Note
+                            if self.note_arr[note.
+                                             note_id].enable and self.note_arr[note.
+                                                                               note_id].parent == i:
+                                # freq = c_float(27.5 * 2**
+                                #                ((chan.pitch_bend - 21) / 12))
+                                freq = c_float(
+                                    self.note_arr[note.note_id].freq *
+                                    (2**
+                                     (1 / 12))**((chan.pitch_bend - 0x40
+                                                 ) / 0x40 * chan.pitch_range))
                                 fmod.FSOUND_SetFrequency(
-                                    note.fmod_channel, freq)
+                                    self.note_arr[note.note_id].fmod_channel,
+                                    freq)
                                 self.log.debug(
-                                    'CMD 0xC0 set freq chan %s note %s err: %s',
-                                    note.fmod_channel, note.note_id,
+                                    'CMD 0xC0 set freq: %s chan: %s err: %s',
+                                    freq,
+                                    self.note_arr[note.note_id].fmod_channel,
                                     fsound_get_error())
-                    elif cmd == 0xC1:
+                    elif cmd_byte == 0xC1:
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.pgm_ctr + 1,
                             pitch_range=sbyte_to_int(
-                                chan.evt_queue[chan.pgm_ctr].arg1))
+                                chan.evt_queue[chan.pgm_ctr].arg1),
+                            pgm_ctr=chan.pgm_ctr + 1)
                         chan: Channel = self.channels[i]
                         for note in chan.notes:
-                            note: Note = self.note_arr[note.note_id]
-                            if note.enable and note.parent == i:
-                                freq = c_float(27.5 * 2**
-                                               ((chan.pitch - 21) / 12))
+                            note: Note
+                            if self.note_arr[note.
+                                             note_id].enable and self.note_arr[note.
+                                                                               note_id].parent == i:
+                                # freq = c_float(27.5 * 2**
+                                #                ((chan.pitch_bend - 21) / 12))
+                                freq = c_float(
+                                    self.note_arr[note.note_id].freq *
+                                    (2**
+                                     (1 / 12))**((chan.pitch_bend - 0x40
+                                                 ) / 0x40 * chan.pitch_range))
                                 fmod.FSOUND_SetFrequency(
-                                    note.fmod_channel, freq)
+                                    self.note_arr[note.note_id].fmod_channel,
+                                    freq)
                                 self.log.debug(
-                                    'CMD 0xC0 set freq chan %s note %s err: %s',
-                                    note.fmod_channel, note.note_id,
+                                    'CMD 0xC0 set freq: %s chan: %s err: %s',
+                                    freq,
+                                    self.note_arr[note.note_id].fmod_channel,
                                     fsound_get_error())
-                    elif cmd == 0xC2:
+                    elif cmd_byte == 0xC2:
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.pgm_ctr + 1,
-                            vib_depth=chan.evt_queue[chan.pgm_ctr].arg1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xC4:
+                            vib_depth=chan.evt_queue[chan.pgm_ctr].arg1,
+                            pgm_ctr=chan.pgm_ctr + 1)
+                    elif cmd_byte == 0xC4:
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.pgm_ctr + 1,
-                            vib_rate=chan.evt_queue[chan.pgm_ctr].arg1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xCE:
+                            vib_rate=chan.evt_queue[chan.pgm_ctr].arg1,
+                            pgm_ctr=chan.pgm_ctr + 1)
+                    elif cmd_byte == 0xCE:
                         for item in chan.notes:
-                            temp: Note = self.note_arr[item.note_id]
-                            if temp.enable and not temp.note_off:
-                                self.note_arr[item.note_id] = temp._replace(
-                                    note_off=True)
+                            if self.note_arr[item.
+                                             note_id].enable and not self.note_arr[item.
+                                                                                   note_id].note_off:
+                                self.note_arr[item.note_id] = self.note_arr[
+                                    item.note_id]._replace(note_off=True)
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.pgm_ctr + 1, sustain=False)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xB3:
+                            sustain=False, pgm_ctr=chan.pgm_ctr + 1)
+                    elif cmd_byte == 0xB3:
                         self.channels[i] = chan._replace(
-                            pgm_ctr=chan.subs[chan.sub_ctr].evt_q_ptr,
                             sub_ctr=chan.sub_ctr + 1,
                             rtn_ptr=chan.pgm_ctr + 1,
+                            pgm_ctr=chan.subs[chan.sub_ctr].evt_q_ptr,
                             in_sub=True)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xB4:
+                    elif cmd_byte == 0xB4:
                         if chan.in_sub:
                             self.channels[i] = chan._replace(
                                 pgm_ctr=chan.rtn_ptr, in_sub=False)
                         else:
                             self.channels[i] = chan._replace(
                                 pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
-                    elif cmd == 0xB2:
-                        looped = True
+                    elif cmd_byte == 0xB2:
+                        just_looped = True
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.loop_ptr, in_sub=False)
-                        chan: Channel = self.channels[i]
-                    elif cmd >= 0xCF:
+                    elif cmd_byte >= 0xCF:
                         ll = stlen_to_ticks(
                             chan.evt_queue[chan.pgm_ctr].cmd_byte - 0xCF) + 1
                         if chan.evt_queue[chan.pgm_ctr].cmd_byte == 0xCF:
@@ -1121,16 +1164,14 @@ class Decoder(object):
                         nn = chan.evt_queue[chan.pgm_ctr].arg1
                         vv = chan.evt_queue[chan.pgm_ctr].arg2
                         uu = chan.evt_queue[chan.pgm_ctr].arg3
-                        self.log.debug('nn %s vv %s uu %s', nn, vv, uu)
                         self.note_q.add(True, 0, nn, 0, vv, i, uu, 0, 0, 0, 0,
                                         0, ll, chan.patch_num)
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                    elif cmd <= 0xB0:
-                        if looped:
-                            looped = False
+                    elif cmd_byte <= 0xB0:
+                        if just_looped:
+                            just_looped = False
                             self.channels[i] = chan._replace(wait_ticks=0)
-                            chan: Channel = self.channels[i]
                         else:
                             pc = chan.pgm_ctr + 1
                             if pc > 1:
@@ -1143,66 +1184,63 @@ class Decoder(object):
                                 wt = chan.evt_queue[chan.pgm_ctr].ticks
                             self.channels[i] = chan._replace(
                                 pgm_ctr=pc, wait_ticks=wt)
-                            chan: Channel = self.channels[i]
                     else:
                         self.channels[i] = chan._replace(
                             pgm_ctr=chan.pgm_ctr + 1)
-                        chan: Channel = self.channels[i]
+                    chan: Channel = self.channels[i]
                 if not in_for:
                     break
-            if self.channels.count > 0:
-                clear_channel: List[bool] = [
+                # END WITH ----------------------------------------------------
+            if len(self.channels) > 0:
+                cleared_channel: List[bool] = [
                     bool() for i in range(len(self.channels))
                 ]
-                for i in range(len(self.note_q)):
-                    note: Note = self.note_q[i]
+                for note in self.note_q:
                     x = self.free_note()
                     if x < 32:
                         self.note_arr[x] = note
-                        chan: Channel = self.channels[note.parent]
-                        if not clear_channel[note.parent]:
-                            clear_channel[note.parent] = True
-                            for note2 in self.channels[note.parent].notes:
-                                note3: Note = self.note_arr[note2.note_id]
-                                if note3.enable and not note3.note_off:
-                                    self.note_arr[
-                                        note2.note_id] = note3._replace(
-                                            note_off=True)
-                                    note3: Note = self.note_arr[note2.note_id]
+                        # BEGIN WITH ------------------------------------------
+                        chan: Channel = self.channels[note.parent]  # WITH STMT
+                        if not cleared_channel[note.parent]:
+                            cleared_channel[note.parent] = True
+                            for note2 in chan.notes:
+                                if self.note_arr[note2.
+                                                 note_id].enable and not self.note_arr[note2.
+                                                                                       note_id].note_off:
+                                    self.note_arr[note2.note_id] = self.note_arr[
+                                        note2.note_id]._replace(note_off=True)
                         self.channels[note.parent].notes.add(x, str(x))
-                        chan: Channel = self.channels[note.parent]
                         pat = note.patch_num
                         nn = note.note_num
                         s_pat = str(pat)
                         s_nn = str(nn)
-                        # n: Note = self.note_arr[x]
 
                         std_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
                         sqr_out = (DirectTypes.SQUARE1, DirectTypes.SQUARE2)
                         das = 0
                         if self.dct_exists(self.directs, pat):
-                            dct: Direct = self.directs[s_pat]
-                            note: Note = self.note_arr[x]
                             self.note_arr[x] = note._replace(
-                                output=NoteTypes(dct.output),
-                                env_attn=dct.env_attn,
-                                env_dcy=dct.env_dcy,
-                                env_sus=dct.env_sus,
-                                env_rel=dct.env_rel)
-                            note: Note = self.note_arr[x]
-                            if dct.output in std_out:
-                                das = str(dct.smp_id)
-                                daf = note_to_freq(nn + (60 - dct.drum_key), -1
-                                                   if self.smp_pool[das].gb_wave
-                                                   else self.smp_pool[das].freq)
+                                output=NoteTypes(self.directs[s_pat].output),
+                                env_attn=self.directs[s_pat].env_attn,
+                                env_dcy=self.directs[s_pat].env_dcy,
+                                env_sus=self.directs[s_pat].env_sus,
+                                env_rel=self.directs[s_pat].env_rel)
+                            if self.directs[s_pat].output in std_out:
+                                das = str(self.directs[s_pat].smp_id)
+                                daf = note_to_freq(
+                                    nn + (60 - self.directs[s_pat].drum_key), -1
+                                    if self.smp_pool[das].gb_wave else
+                                    self.smp_pool[das].freq)
                                 if self.smp_pool[das].gb_wave:
                                     daf /= 2
-                            elif dct.output in sqr_out:
-                                das = f'square{dct.gb1 % 4}'
-                                daf = note_to_freq(nn + (60 - dct.drum_key))
+                            elif self.directs[s_pat].output in sqr_out:
+                                das = f'square{self.directs[s_pat].gb1 % 4}'
+                                daf = note_to_freq(
+                                    nn + (60 - self.directs[s_pat].drum_key))
                             elif dct.output == DirectTypes.NOISE:
-                                das = f'noise{dct.gb1 % 2}{int(random.random() * 3)}'
-                                daf = note_to_freq(nn + (60 - dct.drum_key))
+                                das = f'noise{self.directs[s_pat].gb1 % 2}{int(random.random() * 10)}'
+                                daf = note_to_freq(
+                                    nn + (60 - self.directs[s_pat].drum_key))
                             else:
                                 das = ''
                         elif self.inst_exists(pat):
@@ -1322,7 +1360,7 @@ class Decoder(object):
                             if self.output == SongTypes.WAVE:
                                 if not mutethis:
                                     out = x + 1
-                                    p = fmod.FSOUND_PlaySound(
+                                    fmod.FSOUND_PlaySound(
                                         x + 1, self.smp_pool[das].fmod_smp)
                                     self.note_arr[x] = self.note_arr[
                                         x]._replace(fmod_channel=out)
@@ -1341,11 +1379,11 @@ class Decoder(object):
                             chan: Channel = self.channels[note.parent]
                             if self.output == SongTypes.WAVE:
                                 freq = c_float(27.5 * 2**
-                                               ((chan.pitch - 21) / 12))
+                                               ((chan.pitch_bend - 21) / 12))
                                 fmod.FSOUND_SetFrequency(
                                     note.fmod_channel,
                                     c_float(daf * (2**(1 / 12))**
-                                            ((chan.pitch - 0x40
+                                            ((chan.pitch_bend - 0x40
                                              ) / 0x40 * chan.pitch_range)))
                                 self.log.debug(
                                     'Set frequency chan: %s freq: %s err: %s',
@@ -1363,18 +1401,14 @@ class Decoder(object):
             if self.note_f_ctr > 0:
                 for i in range(32):
                     if self.note_arr[i].enable:
+                        # BEGIN WITH ------------------------------------------
                         note: Note = self.note_arr[i]
                         if note.output == NoteTypes.DIRECT:
                             if note.note_off and note.phase < NotePhases.RELEASE:
                                 self.note_arr[i] = note._replace(
                                     env_step=0, phase=NotePhases.RELEASE)
-                            note: Note = self.note_arr[i]
-                            if not note.env_step or (
-                                    note.env_pos == note.env_dest) or (
-                                        not note.env_step and
-                                        (note.env_pos <= note.env_dest)) or (
-                                            note.env_step >= 0 and
-                                            note.env_pos >= note.env_dest):
+                                note: Note = self.note_arr[i]
+                            if note.env_step == 0 or note.env_pos == note.env_dest or note.env_step and note.env_pos <= note.env_dest or note.env_step >= 0 and note.env_pos >= note.env_dest:
                                 phase = note.phase
                                 if phase == NotePhases.INITIAL:
                                     self.note_arr[i] = note._replace(
@@ -1521,11 +1555,10 @@ class Decoder(object):
                     xmmm = True
             if not xmmm or not self.tempo:
                 self.stop_song()
-                raise Exception
                 return None
                 # TODO: RaiseEvent SongFinish
 
-        self.prv_tick = 0
+        self.last_tick = 0
         self.tick_ctr = 0
         self.incr += 1
         if self.incr >= int(60000 / (self.tempo * self.SAPPY_PPQN)):
@@ -1542,21 +1575,94 @@ class Decoder(object):
             self.last_tempo = self.tempo
             # TODO: EvtProcessor Stuff
 
+    def val(self, expr: str) -> Union[float, int]:
+        if expr is None:
+            return None
+        try:
+            f = float(expr)
+            i = int(f)
+            if f == i:
+                return i
+            return f
+        except ValueError:
+            out = []
+            is_float = False
+            is_signed = False
+            is_hex = False
+            is_octal = False
+            is_bin = False
+            sep = 0
+            for char in expr:
+                if char in string.digits:
+                    out.append(char)
+                elif char in '-+':
+                    if is_signed:
+                        break
+                    is_signed = True
+                    out.append(char)
+                elif char == '.':
+                    if is_float:
+                        break
+                    if char not in out:
+                        is_float = True
+                        out.append(char)
+                elif char == 'x':
+                    if is_hex:
+                        break
+                    if char not in out and len(out) == 1 and out[0] == '0':
+                        is_hex = True
+                        out.append(char)
+                    else:
+                        return 0
+                elif char == 'o':
+                    if is_octal:
+                        break
+                    if char not in out and len(out) == 1 and out[0] == '0':
+                        is_octal = True
+                        out.append(char)
+                    else:
+                        return 0
+                elif char == 'b':
+                    if is_bin:
+                        break
+                    if char not in out and len(out) == 1 and out[0] == '0':
+                        is_bin = True
+                        out.append(char)
+                    else:
+                        return 0
+                elif char in 'ABCDEFabcdef':
+                    if is_hex:
+                        out.append(char)
+                        sep += 1
+                elif char == '_':
+                    if sep >= 0:
+                        sep = 0
+                        out.append(char)
+                    else:
+                        break
+                elif char == ' ':
+                    continue
+                else:
+                    break
+            try:
+                return eval(''.join(out))
+            except SyntaxError:
+                return 0
+
 
 def main():
     """Main test method."""
     import time
     d = Decoder()
 
-    d.play_song(
-        'C:\\Users\\chenc\\Downloads\\Metroid - Zero Mission (U) [!]\\Metroid - Zero Mission (U) [!].gba',
-        1, 0x8F2C0)
+    d.play_song('H:\\Merci\\Downloads\\Sappy\\MZM.gba', 1, 0x8F2C0)
     while True:
         d.evt_processor_timer(1)
         fmod.FSOUND_Update()
         print(fsound_get_error(), d.note_f_ctr, d.ttl_msecs, d.tick_ctr,
               d.ttl_ticks)
-        time.sleep(0.001)
+        time.sleep(d.tempo / 1000 / 4)
+
     fmod.FSOUND_Close()
 
 

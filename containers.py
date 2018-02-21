@@ -370,7 +370,7 @@ class Channel(NamedTuple):
     main_vol:     int             = 100
     panning:      int             = 0x40
     patch_num:    int             = 0x00
-    pitch:        int             = 0x40
+    pitch_bend:   int             = 0x40
     pitch_range:  int             = 2
     pgm_ctr:      int             = 1
     rtn_ptr:      int             = int()
