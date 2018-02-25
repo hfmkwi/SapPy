@@ -358,34 +358,40 @@ class SubroutineQueue(Collection):
         self.append(subroutine)
 
 
-class Channel(NamedTuple):
+class Channel(object):
     """Sound channel"""
     # yapf: disable
-    in_sub:       bool            = bool()
-    enable:       bool            = True
-    mute:         bool            = False
-    sustain:      bool            = False
-    wait_ticks:   float           = -1.0
-    loop_ptr:     int             = 0
-    main_vol:     int             = 100
-    panning:      int             = 0x40
-    patch_num:    int             = 0x00
-    pitch_bend:   int             = 0x40
-    pitch_range:  int             = 2
-    pgm_ctr:      int             = 1
-    rtn_ptr:      int             = int()
-    sub_ctr:      int             = 1
-    sub_loop_cnt: int             = 1
-    track_len:    int             = int()
-    track_ptr:    int             = int()
-    transpose:    int             = 0
-    vib_depth:    int             = int()
-    vib_rate:     int             = int()
-    key:          str             = str()
-    output:       ChannelTypes    = ChannelTypes.NULL
-    evt_queue:    EventQueue      = EventQueue()
-    notes:        NoteIDQueue     = NoteIDQueue()
-    subs:         SubroutineQueue = SubroutineQueue()
+    def __init__(self, in_sub: bool=False, enable: bool=True, mute: bool=False,
+                 sustain: bool=False, wait_ticks: float=-1, loop_ptr: int=0,
+                 main_vol: int=100, panning: int=0x40, patch_num: int=0x00,
+                 pitch_range: int=2, pgm_ctr: int=1, rtn_ptr: int=0,
+                 sub_ctr: int=1, sub_loop_cnt: int=1, track_len:int=0,
+                 ):
+        self.in_sub:       bool            = bool()
+        self.enable:       bool            = True
+        self.mute:         bool            = False
+        self.sustain:      bool            = False
+        self.wait_ticks:   float           = -1.0
+        self.loop_ptr:     int             = 0
+        self.main_vol:     int             = 100
+        self.panning:      int             = 0x40
+        self.patch_num:    int             = 0x00
+        self.pitch_bend:   int             = 0x40
+        self.pitch_range:  int             = 2
+        self.pgm_ctr:      int             = 1
+        self.rtn_ptr:      int             = int()
+        self.sub_ctr:      int             = 1
+        self.sub_loop_cnt: int             = 1
+        self.track_len:    int             = int()
+        self.track_ptr:    int             = int()
+        self.transpose:    int             = 0
+        self.vib_depth:    int             = int()
+        self.vib_rate:     int             = int()
+        self.key:          str             = str()
+        self.output:       ChannelTypes    = ChannelTypes.NULL
+        self.evt_queue:    EventQueue      = EventQueue()
+        self.notes:        NoteIDQueue     = NoteIDQueue()
+        self.subs:         SubroutineQueue = SubroutineQueue()
     # yapf: enable
 
 
