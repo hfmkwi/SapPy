@@ -4,8 +4,8 @@
 """Data-storage containers for internal use."""
 from collections import deque, UserDict
 from enum import IntEnum
-from typing import (Any, ItemsView, KeysView, MutableSequence, NamedTuple,
-                    Union, ValuesView)
+from typing import (Any, ItemsView, KeysView, MutableSequence, Union,
+                    ValuesView)
 
 from fileio import File
 
@@ -123,9 +123,9 @@ class Collection(deque, UserDict):
         True
         >>> 48879 in c
         True
-        >>> c.key_insert(0xDEAD, 'beef', 0)
+        >>> c.key_insert(0xDEAD, 'bee#f', 0)
         >>> print(c)
-        deque(['beef', 'test'])
+        deque(['bee#f', 'test'])
         >>> c[1]
         'test'
         >>> d = Collection()
@@ -154,7 +154,10 @@ class Collection(deque, UserDict):
     def __delitem__(self, item: int) -> bool:
         out = deque.__getitem__(self, item)
         deque.__delitem__(self, item)
-        self.data.pop(out)
+        try:
+            self.data.pop(out)
+        except:
+            pass
 
     def __getitem__(self, key: Any) -> Any:
         if type(key) == str:
@@ -216,6 +219,8 @@ class Collection(deque, UserDict):
         """Clear all of storage and the keystore."""
         deque.clear(self)
         self.data.clear()
+        assert len(self) == 0
+        assert len(self.data) == 0
 
     def item(self, key: str):
         """Get value from key or index"""
@@ -358,16 +363,37 @@ class SubroutineQueue(Collection):
         self.append(subroutine)
 
 
-class Channel(object):
+class Type(object):
+    """Custom type object"""
+
+    def __str__(self):
+        attr = []
+        for name in dir(self):
+            if name.startswith('_'):
+                continue
+            try:
+                value = repr(getattr(self, name))
+            except:
+                value = str(getattr(self, name))
+            attr.append(f'{name}={value}, ')
+        attr = ''.join(attr)
+
+        template = f'{self.__class__.__name__}({attr})'
+        return template
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        pass
+
+
+class Channel(Type):
     """Sound channel"""
+
     # yapf: disable
-    def __init__(self, in_sub: bool=False, enable: bool=True, mute: bool=False,
-                 sustain: bool=False, wait_ticks: float=-1, loop_ptr: int=0,
-                 main_vol: int=100, panning: int=0x40, patch_num: int=0x00,
-                 pitch_range: int=2, pgm_ctr: int=1, rtn_ptr: int=0,
-                 sub_ctr: int=1, sub_loop_cnt: int=1, track_len:int=0,
-                 ):
-        self.in_sub:       bool            = bool()
+    def __init__(self):
+        self.in_sub:       bool            = False
         self.enable:       bool            = True
         self.mute:         bool            = False
         self.sustain:      bool            = False
@@ -379,15 +405,15 @@ class Channel(object):
         self.pitch_bend:   int             = 0x40
         self.pitch_range:  int             = 2
         self.pgm_ctr:      int             = 1
-        self.rtn_ptr:      int             = int()
+        self.rtn_ptr:      int             = 0
         self.sub_ctr:      int             = 1
         self.sub_loop_cnt: int             = 1
-        self.track_len:    int             = int()
-        self.track_ptr:    int             = int()
+        self.track_len:    int             = 0
+        self.track_ptr:    int             = 0
         self.transpose:    int             = 0
-        self.vib_depth:    int             = int()
-        self.vib_rate:     int             = int()
-        self.key:          str             = str()
+        self.vib_depth:    int             = 0
+        self.vib_rate:     int             = 0
+        self.key:          str             = ''
         self.output:       ChannelTypes    = ChannelTypes.NULL
         self.evt_queue:    EventQueue      = EventQueue()
         self.notes:        NoteIDQueue     = NoteIDQueue()
@@ -395,101 +421,120 @@ class Channel(object):
     # yapf: enable
 
 
-class Direct(NamedTuple):
+class Direct(Type):
     """DirectSound instrument."""
+
     # yapf: disable
-    reverse:   bool        = bool()
-    fix_pitch: bool        = bool()
-    env_attn:  int         = 0x00
-    env_dcy:   int         = 0x00
-    env_sus:   int         = 0x00
-    env_rel:   int         = 0x00
-    raw0:      int         = 0x00
-    raw1:      int         = 0x00
-    gb1:       int         = 0x00
-    gb2:       int         = 0x00
-    gb3:       int         = 0x00
-    gb4:       int         = 0x00
-    drum_key:  int         = 0x3C
-    key:       str         = str()
-    smp_id:    str         = str()
-    output:    int         = DirectTypes.NULL
+    def __init__(self, key: str):
+        self.reverse:   bool = False
+        self.fix_pitch: bool = False
+        self.env_attn:  int  = 0x00
+        self.env_dcy:   int  = 0x00
+        self.env_sus:   int  = 0x00
+        self.env_rel:   int  = 0x00
+        self.raw0:      int  = 0x00
+        self.raw1:      int  = 0x00
+        self.gb1:       int  = 0x00
+        self.gb2:       int  = 0x00
+        self.gb3:       int  = 0x00
+        self.gb4:       int  = 0x00
+        self.drum_key:  int  = 0x3C
+        self.key:       str  = key
+        self.smp_id:    str  = ''
+        self.output:    int  = DirectTypes.NULL
     # yapf: enable
 
 
-class DrumKit(NamedTuple):
+class DrumKit(Type):
     """Represents a drumkit; contains a queue of DirectSound instruments."""
+
     # yapf: disable
-    key:     str         = str()
-    directs: DirectQueue = DirectQueue()
+    def __init__(self, key: str):
+        self.key:     str         = key
+        self.directs: DirectQueue = DirectQueue()
     # yapf: enable
 
 
-class Event(NamedTuple):
+class Event(Type):
     """Internal event"""
+
     # yapf: disable
-    cmd_byte: int = int()
-    arg1:     int = int()
-    arg2:     int = int()
-    arg3:     int = int()
-    ticks:    int = int()
+    def __init__(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int, ):
+        self.cmd_byte: int = cmd_byte
+        self.arg1:     int = arg1
+        self.arg2:     int = arg2
+        self.arg3:     int = arg3
+        self.ticks:    int = ticks
     # yapf: enable
 
 
-class Instrument(NamedTuple):
-    """Represents an instrument; uses a DirectSound queue to hold sound samples.
-    """
+class Instrument(Type):
+    """Represents an instrument; uses a DirectSound queue to hold sound samples."""
+
     # yapf: disable
-    key:     str         = str()
-    directs: DirectQueue = DirectQueue()
-    kmaps:   KeyMapQueue = KeyMapQueue()
+    def __init__(self, key: str):
+        self.key:     str         = key
+        self.directs: DirectQueue = DirectQueue()
+        self.kmaps:   KeyMapQueue = KeyMapQueue()
     # yapf: enable
 
 
-class KeyMap(NamedTuple):
+class KeyMap(Type):
     """Represents a MIDI instrument keybind."""
+
     # yapf: disable
-    assign_dct: int = int()
-    key:        str = str()
+    def __init__(self, key: str, assign_dct: int):
+        self.assign_dct: int = assign_dct
+        self.key:        str = key
     # yapf: enable
 
 
-class Note(NamedTuple):
+class Note(Type):
     """Container representing a single note in the AGB sound engine."""
+    __slots__ = ('enable', 'fmod_channel', 'note_num', 'freq', 'velocity',
+                 'parent', 'unk_val', 'output', 'env_attn', 'env_dcy',
+                 'env_sus', 'env_rel', 'wait_ticks', 'patch_num')
+
     # yapf: disable
-    enable:       bool       = bool()
-    note_off:     bool       = False
-    env_dest:     float      = 0.0
-    env_pos:      float      = 0.0
-    env_step:     float      = 0.0
-    wait_ticks:   float      = float()
-    env_attn:     int        = int()
-    env_dcy:      int        = int()
-    env_rel:      int        = int()
-    env_sus:      int        = int()
-    fmod_channel: int        = int()
-    freq:         int        = int()
-    note_num:      int        = int()
-    parent:       int        = int()
-    patch_num:    int        = int()
-    unk_val:      int        = int()
-    velocity:     int        = int()
-    key:          str        = str()
-    smp_id:       str        = str()
-    output:       NoteTypes  = NoteTypes.NULL
-    phase:        NotePhases = NotePhases.INITIAL
+    def __init__(self, enable: bool, fmod_channel: int, note_num: int, freq: int,
+                 velocity: int, parent: int, unk_val: int, output: NoteTypes,
+                 env_attn: int, env_dcy: int, env_sus: int, env_rel: int,
+                 wait_ticks: float, patch_num: int):
+        self.enable:       bool       = enable
+        self.note_off:     bool       = False
+        self.env_dest:     float      = 0.0
+        self.env_pos:      float      = 0.0
+        self.env_step:     float      = 0.0
+        self.wait_ticks:   float      = wait_ticks
+        self.env_attn:     int        = env_attn
+        self.env_dcy:      int        = env_dcy
+        self.env_rel:      int        = env_rel
+        self.env_sus:      int        = env_sus
+        self.fmod_channel: int        = fmod_channel
+        self.freq:         int        = freq
+        self.note_num:     int        = note_num
+        self.parent:       int        = parent
+        self.patch_num:    int        = patch_num
+        self.unk_val:      int        = unk_val
+        self.velocity:     int        = velocity
+        self.key:          str        = ''
+        self.smp_id:       str        = ''
+        self.output:       NoteTypes  = output
+        self.phase:        NotePhases = NotePhases.INITIAL
     # yapf: enable
 
 
-class NoteID(NamedTuple):
+class NoteID(Type):
     """Internal note ID."""
+
     # yapf: disable
-    note_id: int = int()
-    key:     str = str()
+    def __init__(self, key: str, note_id: int):
+        self.note_id: int = 0
+        self.key:     str = ''
     # yapf: enable
 
 
-class Sample(NamedTuple):
+class Sample(Type):
     """Sound sample for use during playback."""
 
     class SampleDataBytes(MutableSequence):
@@ -534,21 +579,22 @@ class Sample(NamedTuple):
             self._storage.insert(index, value)
 
     # yapf: disable
-    gb_wave:    bool      = bool()
-    loop:       bool      = bool()
-    smp_data:   bytearray = SampleDataBytes()
-    fmod_smp:   int       = int()
-    freq:       int       = int()
-    loop_start: int       = int()
-    size:       int       = int()
-    key:        str       = str()
-    smp_data:   str       = str()
+    def __init__(self, key: str):
+        self.gb_wave:    bool      = False
+        self.loop:       bool      = False
+        self.smp_data_b:   bytearray = self.SampleDataBytes()
+        self.fmod_smp:   int       = 0
+        self.freq:       int       = 0
+        self.loop_start: int       = 0
+        self.size:       int       = 0
+        self.key:        str       = key
+        self.smp_data:   str       = ''
     # yapf: enable
 
     @property
     def smp_data_len(self):
         """Number of int in sample"""
-        return len(self.smp_data)
+        return len(self.smp_data_b)
 
     def rd_smp_data(self, id: int, t_size: int):
         """Read sample data as int from AGB rom."""
@@ -556,18 +602,20 @@ class Sample(NamedTuple):
         smp_data = bytearray()
         for i in range(t_size):  # pylint: disable=W0612
             smp_data.append(file.read_byte())
-        self.smp_data = self.SampleDataBytes(smp_data)
+        self.smp_data_b = self.SampleDataBytes(smp_data)
 
     def sav_smp_data(self, id: int):
         """Save bytearray of sample data to AGB rom."""
         file = File.from_id(id)
-        for byte in self.smp_data:
+        for byte in self.smp_data_b:
             file.write_byte(byte)
 
 
-class Subroutine(NamedTuple):
+class Subroutine(Type):
     """Internal AGB subroutine ID."""
+
     # yapf: disable
-    evt_q_ptr: int = int()
-    key:       str = str()
+    def __init__(self, key: str, evt_q_ptr: int):
+        self.evt_q_ptr: int = 0
+        self.key:       str = ''
     # yapf: enable

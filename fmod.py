@@ -12,7 +12,7 @@ __all__ = ('fmod', 'FModErrors', 'FSoundOutputTypes', 'FSoundMixerTypes',
            'FSoundReverbChannelProperties', 'FSoundReverbChannelFlags',
            'FSoundFXModes', 'FSoundSpeakerModes', 'FSoundInitModes',
            'FSoundStreamNetStatus', 'FSoundTagFieldType', 'FSoundStatusFlags',
-           'FSoundTOCTag', 'fsound_get_error_string', 'fsound_get_error')
+           'FSoundTOCTag', 'get_err', 'get_err_str')
 
 FMOD_VERSION = 3.74
 
@@ -22,25 +22,25 @@ fmod = windll.fmod
 class FModErrors(IntEnum):
     # yapf: disable
     FMOD_ERR_NONE           = 0
-    FMOD_ERR_BUSY           = auto()
-    FMOD_ERR_UNINIT         = auto()
-    FMOD_ERR_INIT           = auto()
-    FMOD_ERR_ALLOC          = auto()
-    FMOD_ERR_PLAY           = auto()
-    FMOD_ERR_OUTPUT_FORMAT  = auto()
-    FMOD_ERR_COOP_LEVEL     = auto()
-    FMOD_ERR_CREATE_BUFFER  = auto()
-    FMOD_ERR_FILE_NOTFOUND  = auto()
-    FMOD_ERR_FILE_UNKFORMAT = auto()
-    FMOD_ERR_FILE_BAD       = auto()
-    FMOD_ERR_MEMORY         = auto()
-    FMOD_ERR_VERSION        = auto()
-    FMOD_ERR_INV_PARAM      = auto()
-    FMOD_ERR_NO_EAX         = auto()
-    FMOD_ERR_CHANNEL_ALLOC  = auto()
-    FMOD_ERR_RECORD         = auto()
-    FMOD_ERR_MEDIAPLAYER    = auto()
-    FMOD_ERR_CD_DEVICE      = auto()
+    FMOD_ERR_BUSY           = 1
+    FMOD_ERR_UNINIT         = 2
+    FMOD_ERR_INIT           = 3
+    FMOD_ERR_ALLOC          = 4
+    FMOD_ERR_PLAY           = 5
+    FMOD_ERR_OUTPUT_FORMAT  = 6
+    FMOD_ERR_COOP_LEVEL     = 7
+    FMOD_ERR_CREATE_BUFFER  = 8
+    FMOD_ERR_FILE_NOTFOUND  = 9
+    FMOD_ERR_FILE_UNKFORMAT = 10
+    FMOD_ERR_FILE_BAD       = 11
+    FMOD_ERR_MEMORY         = 12
+    FMOD_ERR_VERSION        = 13
+    FMOD_ERR_INV_PARAM      = 14
+    FMOD_ERR_NO_EAX         = 15
+    FMOD_ERR_CHANNEL_ALLOC  = 16
+    FMOD_ERR_RECORD         = 17
+    FMOD_ERR_MEDIAPLAYER    = 18
+    FMOD_ERR_CD_DEVICE      = 19
 # yapf: enable
 
 
@@ -332,12 +332,12 @@ FMOD_ERR_MESSAGES = {
 }
 
 
-def fsound_get_error_string(errcode: int) -> str:
+def get_err(errcode: int) -> str:
     msg = FMOD_ERR_MESSAGES.get(FModErrors(errcode))
     if not msg:
         msg = "Unknown error"
     return msg
 
 
-def fsound_get_error() -> str:
-    return fsound_get_error_string(fmod.FSOUND_GetError())
+def get_err_str() -> str:
+    return get_err(fmod.FSOUND_GetError())

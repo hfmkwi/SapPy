@@ -23,7 +23,7 @@ NOTES = {
     2:  'D',
     3:  'D#',
     4:  'E',
-    5:  'F',
+    5:  '#f',
     6:  'F#',
     7:  'G',
     8:  'G#',
@@ -236,26 +236,27 @@ class WaveHeader(NamedTuple):
     # yapf: enable
 
 
-def note_to_name(midi_note: bytes) -> str:
+def note_to_name(midi_note: int) -> str:
     """Retrieve the string name of a MIDI note from its byte representation."""
-    midi_note = unpack('B', midi_note)
-    octave, note = divmod(midi_note, 12)
-    return NOTES.get(note) + octave
+    x = midi_note % 12
+    o = midi_note // 12 - 2
+    return NOTES.get(x) + str(o)
 
 
 def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
     """Retrieve the sound frequency of a MIDI note relative to C3."""
+    import math
     magic = 2**(1 / 12)
-    delta_x = midi_note - 0x3C
+    X = midi_note - 0x3C
     if midc_freq == -1:
-        a_freq = 7040
-        c_freq = a_freq * magic**3
+        a = 7040
+        c = a * magic**3
     elif midc_freq == -2:
-        a_freq = 7040 / 2
-        c_freq = a_freq * magic**3
+        a = 7040 / 2
+        c = a * magic**3
     else:
-        c_freq = midc_freq
-    return c_freq * magic**delta_x
+        c = midc_freq
+    return math.ceil(c * (magic**X))
 
 
 def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:

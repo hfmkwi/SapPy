@@ -85,11 +85,8 @@ class File(object):  # pylint: disable=R0902
 
     @rd_addr.setter
     def rd_addr(self, addr: int = None) -> None:
-        if addr is None:
-            addr = self._rd_addr
-        elif addr < 0:
-            addr = 0
-        self._rd_addr = addr
+        if addr is not None and addr > -1:
+            self._rd_addr = addr
 
     @property
     def size(self):
@@ -185,7 +182,7 @@ class File(object):  # pylint: disable=R0902
         self.rd_addr = addr
         self._file.seek(self.rd_addr)
         byte = struct.unpack('B', self._file.read(1))[0]
-        self.rd_addr = self._file.tell()
+        self.rd_addr += 1
         return byte
 
     def _get_free_id(self) -> int:
@@ -369,7 +366,7 @@ class File(object):  # pylint: disable=R0902
         out = map(chr, out)
         return ''.join(out)
 
-    def rd_gba_ptr(self, addr: int = -1) -> int:
+    def rd_gba_ptr(self, addr: int = None) -> int:
         """Read a stream of int as an AGB rom pointer.
 
         Args:
@@ -393,5 +390,5 @@ def open_file(file_path: str, file_id: int = None) -> File:
 def open_new_file(file_path: str, file_id: int = None) -> File:
     """Create a new file and open with read/write access in byte mode"""
     with open(file_path, 'wb+') as file:
-        file.write(bytes([0]))
+        file.write(bytes(1))
     return open_file(file_path, file_id)
