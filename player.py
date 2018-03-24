@@ -2,6 +2,7 @@
 #-*- coding: utf-8 -*-
 # pylint: disable=C0326,E1120,R0903
 """Player types"""
+import math
 from struct import unpack, pack
 from typing import NamedTuple
 
@@ -33,22 +34,22 @@ NOTES = {
 }
 # yapf: enable
 STLEN = {
-    0x00: 0x00,
-    0x01: 0x01,
-    0x02: 0x02,
-    0x03: 0x03,
-    0x04: 0x04,
-    0x05: 0x05,
-    0x06: 0x06,
-    0x07: 0x07,
-    0x08: 0x08,
-    0x09: 0x09,
-    0x0A: 0x0A,
-    0x0B: 0x0B,
-    0x0C: 0x0C,
-    0x0D: 0x0D,
-    0x0E: 0x0E,
-    0x0F: 0x0F,
+    0x0: 0x0,
+    0x1: 0x1,
+    0x2: 0x2,
+    0x3: 0x3,
+    0x4: 0x4,
+    0x5: 0x5,
+    0x6: 0x6,
+    0x7: 0x7,
+    0x8: 0x8,
+    0x9: 0x9,
+    0xA: 0xA,
+    0xB: 0xB,
+    0xC: 0xC,
+    0xD: 0xD,
+    0xE: 0xE,
+    0xF: 0xF,
     0x10: 0x10,
     0x11: 0x11,
     0x12: 0x12,
@@ -63,13 +64,13 @@ STLEN = {
     0x1B: 0x20,
     0x1C: 0x24,
     0x1D: 0x28,
-    0x1E: 0x2C,
-    0x1F: 0x2E,
+    0x1E: 0x2A,
+    0x1F: 0x2C,
     0x20: 0x30,
     0x21: 0x34,
-    0x22: 0x38,
-    0x23: 0x3C,
-    0x24: 0x3E,
+    0x22: 0x36,
+    0x23: 0x38,
+    0x24: 0x3C,
     0x25: 0x40,
     0x26: 0x42,
     0x27: 0x44,
@@ -246,17 +247,21 @@ def note_to_name(midi_note: int) -> str:
 def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
     """Retrieve the sound frequency of a MIDI note relative to C3."""
     import math
-    magic = 2**(1 / 12)
+    magic = math.pow(2, 1.0 / 12.0)
     X = midi_note - 0x3C
     if midc_freq == -1:
         a = 7040
-        c = a * magic**3
+        c = a * math.pow(magic, 3)
     elif midc_freq == -2:
         a = 7040 / 2
-        c = a * magic**3
+        c = a * math.pow(magic, 3)
     else:
         c = midc_freq
-    return math.ceil(c * (magic**X))
+        #print(c)
+
+    x = c * math.pow(magic, X)
+    #print(note_to_name(midi_note), x)
+    return int(x)
 
 
 def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:
@@ -359,7 +364,7 @@ def rd_mul_head(file_id: int, addr: int = None) -> MultiHeader:
         b0      = w_file.rd_byte(),
         b1      = w_file.rd_byte(),
         dct_tbl = w_file.rd_ltendian(4),
-        kmap = w_file.rd_ltendian(4)
+        kmap    = w_file.rd_ltendian(4)
     )
     # yapf: enable
     return header
@@ -460,7 +465,7 @@ def rd_wav_head(file_id: int, addr: int = None) -> WaveHeader:
 
 def sbyte_to_int(sbyte: int) -> int:
     """Convert a signed 4-byte bytearray into a signed integer."""
-    return unpack('i', pack('bbbb', sbyte, 0, 0, 0))[0]
+    return sbyte - 0x100 if sbyte >= 0x80 else sbyte
 
 
 def stlen_to_ticks(short_len: int) -> int:

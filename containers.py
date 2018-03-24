@@ -404,9 +404,9 @@ class Channel(Type):
         self.patch_num:    int             = 0x00
         self.pitch_bend:   int             = 0x40
         self.pitch_range:  int             = 2
-        self.pgm_ctr:      int             = 1
+        self.pgm_ctr:      int             = 0
         self.rtn_ptr:      int             = 0
-        self.sub_ctr:      int             = 1
+        self.sub_ctr:      int             = 0
         self.sub_loop_cnt: int             = 1
         self.track_len:    int             = 0
         self.track_ptr:    int             = 0
@@ -520,7 +520,7 @@ class Note(Type):
         self.key:          str        = ''
         self.smp_id:       str        = ''
         self.output:       NoteTypes  = output
-        self.phase:        NotePhases = NotePhases.INITIAL
+        self.phase:        NotePhases = NotePhases.NULL
     # yapf: enable
 
 
@@ -529,8 +529,8 @@ class NoteID(Type):
 
     # yapf: disable
     def __init__(self, key: str, note_id: int):
-        self.note_id: int = 0
-        self.key:     str = ''
+        self.note_id: int = note_id
+        self.key:     str = key
     # yapf: enable
 
 
@@ -582,7 +582,7 @@ class Sample(Type):
     def __init__(self, key: str):
         self.gb_wave:    bool      = False
         self.loop:       bool      = False
-        self.smp_data_b:   bytearray = self.SampleDataBytes()
+        self.smp_data_b: bytearray = self.SampleDataBytes()
         self.fmod_smp:   int       = 0
         self.freq:       int       = 0
         self.loop_start: int       = 0
@@ -616,6 +616,6 @@ class Subroutine(Type):
 
     # yapf: disable
     def __init__(self, key: str, evt_q_ptr: int):
-        self.evt_q_ptr: int = 0
-        self.key:       str = ''
+        self.evt_q_ptr: int = evt_q_ptr
+        self.key:       str = key
     # yapf: enable

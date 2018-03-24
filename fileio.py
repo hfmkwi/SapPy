@@ -85,13 +85,15 @@ class File(object):  # pylint: disable=R0902
 
     @rd_addr.setter
     def rd_addr(self, addr: int = None) -> None:
-        if addr is not None and addr > -1:
+        if addr is not None and addr >= 0:
             self._rd_addr = addr
+        else:
+            self._rd_addr = self._rd_addr
 
     @property
     def size(self):
         """Number of int in file"""
-        return getsize(self.path) + 1
+        return getsize(self.path)
 
     @property
     def wr_addr(self) -> int:
@@ -100,11 +102,8 @@ class File(object):  # pylint: disable=R0902
 
     @wr_addr.setter
     def wr_addr(self, addr: int = None) -> None:
-        if addr is None:
-            addr = self._wr_addr
-        elif addr < 0:
-            addr = 0
-        self._wr_addr = addr
+        if addr is not None and addr >= 0:
+            self._wr_addr = addr
 
     @staticmethod
     def gba_ptr_to_addr(ptr: int) -> int:
@@ -181,7 +180,7 @@ class File(object):  # pylint: disable=R0902
         """
         self.rd_addr = addr
         self._file.seek(self.rd_addr)
-        byte = struct.unpack('B', self._file.read(1))[0]
+        byte = ord(self._file.read(1))
         self.rd_addr += 1
         return byte
 
@@ -288,8 +287,7 @@ class File(object):  # pylint: disable=R0902
             an integer [0-255]
 
         """
-        self.rd_addr = addr
-        return self._get(self.rd_addr)
+        return self._get(addr)
 
     def rd_vlq(self, addr: int = None) -> int:
         """Read a stream of int in VLQ format
@@ -378,7 +376,7 @@ class File(object):  # pylint: disable=R0902
 
         """
         self.rd_addr = addr
-        ptr = self.rd_ltendian(4, self.rd_addr)
+        ptr = self.rd_ltendian(4)
         return self.gba_ptr_to_addr(ptr)
 
 
