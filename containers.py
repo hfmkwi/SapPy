@@ -45,7 +45,6 @@ class DirectTypes(IntEnum):
     UNK5    = 5
     UNK6    = 6
     UNK7    = 7
-    NULL    = 255
     # yapf: enable
 
 
@@ -60,7 +59,6 @@ class NoteTypes(IntEnum):
     UNK5    = 5
     UNK6    = 6
     UNK7    = 7
-    NULL    = 255
     # yapf: enable
 
 
@@ -73,7 +71,6 @@ class NotePhases(IntEnum):
     SUSTAIN = 3
     RELEASE = 4
     NOTEOFF = 5
-    NULL    = 255
     # yapf: enable
 
 
@@ -314,24 +311,13 @@ class NoteQueue(Collection):
     """LIFO container of AGB notes."""
 
     # yapf: disable
-    def add(self, enable: bool, fmod_channel: int, note_num: int,
-            freq: int, velocity: int, parent: int, unk_val: int,
-            output: NoteTypes, env_attn: int, env_dcy: int, env_sus: int,
-            env_rel: int, wait_ticks: int, patch_num: int) -> None:
+    def add(self, note_num: int, velocity: int, parent: int, unk_val: int, wait_ticks: float, patch_num: int) -> None:
         """Initialize and append a new note."""
         note = Note(
-            enable       = enable,
-            fmod_channel = fmod_channel,
             note_num     = note_num,
-            freq         = freq,
             velocity     = velocity,
             parent       = parent,
             unk_val      = unk_val,
-            output       = output,
-            env_attn     = env_attn,
-            env_dcy      = env_dcy,
-            env_sus      = env_sus,
-            env_rel      = env_rel,
             wait_ticks   = wait_ticks,
             patch_num    = patch_num
         )
@@ -369,12 +355,13 @@ class Type(object):
     def __str__(self):
         attr = []
         for name in dir(self):
-            if name.startswith('_'):
+            if name.startswith('_') or name not in self.__slots__:
                 continue
+            obj = getattr(self, name)
             try:
-                value = repr(getattr(self, name))
+                value = repr(obj)
             except:
-                value = str(getattr(self, name))
+                value = str(obj)
             attr.append(f'{name}={value}, ')
         attr = ''.join(attr)
 
@@ -405,6 +392,7 @@ class Channel(Type):
         self.pitch_bend:   int             = 0x40
         self.pitch_range:  int             = 2
         self.pgm_ctr:      int             = 0
+        self.priority:     int             = 0
         self.rtn_ptr:      int             = 0
         self.sub_ctr:      int             = 0
         self.sub_loop_cnt: int             = 1
@@ -414,7 +402,7 @@ class Channel(Type):
         self.vib_depth:    int             = 0
         self.vib_rate:     int             = 0
         self.key:          str             = ''
-        self.output:       ChannelTypes    = ChannelTypes.NULL
+        self.output:       ChannelTypes    = ChannelTypes.DIRECT
         self.evt_queue:    EventQueue      = EventQueue()
         self.notes:        NoteIDQueue     = NoteIDQueue()
         self.subs:         SubroutineQueue = SubroutineQueue()
@@ -423,6 +411,9 @@ class Channel(Type):
 
 class Direct(Type):
     """DirectSound instrument."""
+    __slots__ = ('reverse', 'fix_pitch', 'env_attn', 'env_dcy', 'env_sus',
+                 'env_rel', 'raw0', 'raw1', 'gb1', 'gb2', 'gb3', 'gb4',
+                 'drum_key', 'key', 'smp_id', 'output')
 
     # yapf: disable
     def __init__(self, key: str):
@@ -441,12 +432,13 @@ class Direct(Type):
         self.drum_key:  int  = 0x3C
         self.key:       str  = key
         self.smp_id:    str  = ''
-        self.output:    int  = DirectTypes.NULL
+        self.output:    int  = DirectTypes.DIRECT
     # yapf: enable
 
 
 class DrumKit(Type):
     """Represents a drumkit; contains a queue of DirectSound instruments."""
+    __slots__ = ('key', 'directs')
 
     # yapf: disable
     def __init__(self, key: str):
@@ -457,6 +449,7 @@ class DrumKit(Type):
 
 class Event(Type):
     """Internal event"""
+    __slots__ = ('cmd_byte', 'arg1', 'arg2', 'arg3', 'ticks')
 
     # yapf: disable
     def __init__(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int, ):
@@ -470,6 +463,7 @@ class Event(Type):
 
 class Instrument(Type):
     """Represents an instrument; uses a DirectSound queue to hold sound samples."""
+    __slots__ = ('key', 'directs', 'kmaps')
 
     # yapf: disable
     def __init__(self, key: str):
@@ -481,6 +475,7 @@ class Instrument(Type):
 
 class KeyMap(Type):
     """Represents a MIDI instrument keybind."""
+    __slots__ = ('assign_dct', 'key')
 
     # yapf: disable
     def __init__(self, key: str, assign_dct: int):
@@ -491,27 +486,27 @@ class KeyMap(Type):
 
 class Note(Type):
     """Container representing a single note in the AGB sound engine."""
-    __slots__ = ('enable', 'fmod_channel', 'note_num', 'freq', 'velocity',
-                 'parent', 'unk_val', 'output', 'env_attn', 'env_dcy',
-                 'env_sus', 'env_rel', 'wait_ticks', 'patch_num')
+    __slots__ = ('enable', 'note_off', 'env_dest', 'env_pos', 'env_step',
+                 'vib_pos', 'wait_ticks', 'env_attn', 'env_dcy', 'env_rel',
+                 'env_sus', 'fmod_channel', 'freq', 'note_num', 'parent',
+                 'patch_num', 'unk_val', 'velocity', 'key', 'smp_id', 'output',
+                 'phase')
 
     # yapf: disable
-    def __init__(self, enable: bool, fmod_channel: int, note_num: int, freq: int,
-                 velocity: int, parent: int, unk_val: int, output: NoteTypes,
-                 env_attn: int, env_dcy: int, env_sus: int, env_rel: int,
-                 wait_ticks: float, patch_num: int):
-        self.enable:       bool       = enable
+    def __init__(self, note_num: int, velocity: int, parent: int, unk_val: int, wait_ticks: float, patch_num: int):
+        self.enable:       bool       = True
         self.note_off:     bool       = False
         self.env_dest:     float      = 0.0
         self.env_pos:      float      = 0.0
         self.env_step:     float      = 0.0
+        self.vib_pos:      float      = 0.0
         self.wait_ticks:   float      = wait_ticks
-        self.env_attn:     int        = env_attn
-        self.env_dcy:      int        = env_dcy
-        self.env_rel:      int        = env_rel
-        self.env_sus:      int        = env_sus
-        self.fmod_channel: int        = fmod_channel
-        self.freq:         int        = freq
+        self.env_attn:     int        = 0
+        self.env_dcy:      int        = 0
+        self.env_rel:      int        = 0
+        self.env_sus:      int        = 0
+        self.fmod_channel: int        = 0
+        self.freq:         int        = 0
         self.note_num:     int        = note_num
         self.parent:       int        = parent
         self.patch_num:    int        = patch_num
@@ -519,13 +514,18 @@ class Note(Type):
         self.velocity:     int        = velocity
         self.key:          str        = ''
         self.smp_id:       str        = ''
-        self.output:       NoteTypes  = output
-        self.phase:        NotePhases = NotePhases.NULL
+        self.output:       NoteTypes  = NoteTypes.DIRECT
+        self.phase:        NotePhases = NotePhases.INITIAL
     # yapf: enable
+
+    def reset(self):
+        self.note_off = True
+        self.vib_pos = 0.0
 
 
 class NoteID(Type):
     """Internal note ID."""
+    __slots__ = ('note_id', 'key')
 
     # yapf: disable
     def __init__(self, key: str, note_id: int):

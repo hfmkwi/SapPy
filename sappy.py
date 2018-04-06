@@ -5,15 +5,9 @@
 # TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
 import math
-import os
-import random
-import string
-import time
-from contextlib import suppress
-from ctypes import *
-from enum import IntEnum
+from os import remove
+from random import random
 from logging import INFO, basicConfig, getLogger
-from struct import unpack
 from typing import List, NamedTuple, Union
 
 from containers import *
@@ -21,31 +15,13 @@ from fileio import *
 from fmod import *
 from player import *
 
-#fmod = system.System()
-
-DEBUG = True
-
-
-class SongTypes(IntEnum):
-    """Possible outputs for each song."""
-    NULL = 0
-    WAVE = 1
-    MIDI = 2
-
-
-class RawMidiEvent(NamedTuple):
-    """MIDI event container."""
-    # yapf: disable
-    d_raw:    int = 0
-    ticks:    int = 0
-    evt_code: int = 0
-    # yapf: enable
+BASE = math.pow(2, 1 / 12)
 
 
 class Decoder(object):
     """Decoder/interpreter for Sappy code."""
     DEBUG = False
-    GB_SQ_MULTI = 0.5 / 2
+    GB_SQ_MULTI = 0.5 / 4
     GB_WAV_MULTI = 0.5
     GB_WAV_BASE_FREQ = 880
     GB_NSE_MULTI = 0.5
@@ -54,32 +30,26 @@ class Decoder(object):
     if DEBUG:
         basicConfig(level=DEBUG)
     else:
-        basicConfig(level=INFO)
+        basicConfig(level=None)
     log = getLogger(name=__name__)
 
     def __init__(self):
         # yapf: disable
         self.playing:      bool                        = False
-        self.record:       bool                        = False
-        self.beats:        int                         = 0
         self.gb1_chan:     int                         = 0
         self.gb2_chan:     int                         = 0
         self.gb3_chan:     int                         = 0
         self.gb4_chan:     int                         = 0
         self.incr:         int                         = 0
         self.inst_tbl_ptr: int                         = 0
-        self.last_tempo:   int                         = 0
         self.layer:        int                         = 0
         self.sng_lst_ptr:  int                         = 0
         self.sng_num:      int                         = 0
         self.sng_ptr:      int                         = 0
         self.tempo:        int                         = 0
-        self.ttl_ticks:    int                         = 0
-        self.ttl_msecs:    int                         = 0
         self.transpose:    int                         = 0
         self._gbl_vol:     int                         = 256
         self.note_f_ctr:   float                       = 0.0
-        self.last_tick:    float                       = 0.0
         self.tick_ctr:     float                       = 0.0
         self.rip_ears:     Collection                  = Collection()
         self.mdrum_map:    list                        = []
@@ -88,7 +58,6 @@ class Decoder(object):
         self.fpath:        str                         = ''
         self.mfile:        File                        = None
         self.wfile:        File                        = None
-        self.output:       SongTypes                   = SongTypes.WAVE
         self.channels:     ChannelQueue[Channel]       = ChannelQueue()  # pylint:    disable = E1136
         self.dct_head:     DirectHeader                = DirectHeader()
         self.directs:      DirectQueue[Direct]         = DirectQueue()  # pylint:     disable = E1136
@@ -96,27 +65,25 @@ class Decoder(object):
         self.drmkits:      DrumKitQueue[DrumKit]       = DrumKitQueue()  # pylint:    disable = E1136
         self.inst_head:    InstrumentHeader            = InstrumentHeader()
         self.insts:        InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
-        self.note_arr:     list                        = Collection([Note(*[0]*14)] * 32)
+        self.note_arr:     List                        = Collection([Note(*[0]*6)] * 32)
         self.nse_wavs:     List[List[str]]             = [[[] for i in range(10)] for i in range(2)]
         self.mul_head:     MultiHeader                 = MultiHeader()
         self.gb_head:      NoiseHeader                 = NoiseHeader()
         self.note_q:       NoteQueue[Note]             = NoteQueue()  # pylint:       disable = E1136
-        self.last_evt:     RawMidiEvent                = RawMidiEvent()
         self.smp_head:     SampleHeader                = SampleHeader()
         self.smp_pool:     SampleQueue[Sample]         = SampleQueue()  # pylint:     disable = E1136
         self.just_looped:  bool                        = False
         # yapf: enable
-        random.seed(time.time())
         sz = 16383
         sz = 2048
         if not sz:
             sz = 2048
         for i in range(10):
             for _ in range(sz):
-                self.nse_wavs[0][i].append(chr(int(random.random() * 153)))
+                self.nse_wavs[0][i].append(chr(int(random() * 153)))
             self.nse_wavs[0][i] = "".join(self.nse_wavs[0][i])
             for _ in range(256):
-                self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
+                self.nse_wavs[1][i].append(chr(int(random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
         #self.gbl_vol = 255
 
@@ -127,7 +94,7 @@ class Decoder(object):
 
     @gbl_vol.setter
     def gbl_vol(self, vol: int) -> None:
-        fmod.FSOUND_SetSFXMasterVolume(vol)
+        setMasterVolume(vol)
         self._gbl_vol = vol
 
     def dct_exists(self, dcts: DirectQueue, dct_id: int) -> bool:
@@ -137,31 +104,6 @@ class Decoder(object):
             if dct.key == str(dct_id):
                 return True
         return False
-
-    @staticmethod
-    def flip_lng(val: int) -> int:
-        """Truncate and flip the byteorder of a 4 byte integer."""
-        b = ['' for i in range(4)]
-        s1 = (list('00000000') + list(hex(val)[2:]))[-8:]
-        b[0] = s1[0:2]
-        b[1] = s1[2:4]
-        b[2] = s1[4:6]
-        b[3] = s1[6:8]
-        s2 = ''.join(b)
-        return int('0x' + s2, base=16)
-
-    @staticmethod
-    def flip_int(val: int) -> int:
-        """Truncate and flip the byteorder of a 2 byte integer."""
-        b1 = val % 0x100
-        val //= 0x100
-        b2 = val % 0x100
-
-        val = b1
-        val *= 0x100
-        val += b2
-
-        return val
 
     def set_direct(self, direct: Direct, inst_head: InstrumentHeader,
                    dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
@@ -183,44 +125,6 @@ class Decoder(object):
             d.fix_pitch = (inst_head.channel & 0x08) == 0x08
             d.reverse   = (inst_head.channel & 0x10) == 0x10
         # yapf: enable
-
-    @staticmethod
-    def write_var_len(ch: int, val: int) -> None:
-        """UNKNOWN"""
-        buffer = val & 0x7F
-        while val // 128 > 0:
-            val //= 128
-            buffer |= 0x80
-            buffer = (buffer * 256) | (val & 0x7F)
-        file = File.from_id(ch)
-        while True:
-            file.write_byte(buffer & 255)
-            if buffer & 0x80:
-                buffer //= 256
-            else:
-                break
-
-    def add_ear_piercer(self, inst_id: int):
-        """UNKNOWN"""
-        self.rip_ears.append(inst_id)
-
-    def buffer_evt(self, evt_code: str, ticks: int) -> None:
-        """UNKNOWN"""
-        self.mfile: File
-        if not self.record or self.mfile.file_id != 42:
-            return
-        d_raw = ticks - self.last_evt.ticks
-        evt_code = int(evt_code)
-        evt = RawMidiEvent(ticks=ticks, d_raw=d_raw, evt_code=evt_code)
-        self.write_var_len(self.mfile.file_id, evt.d_raw)
-        self.mfile.write_string(evt.evt_code)
-        self.last_evt = evt
-
-    def clear_mpatch_map(self):
-        """Clear the MIDI patch map, the MIDI drum map, and the ear piercers."""
-        self.mpatch_map.clear()
-        self.mdrum_map.clear()
-        self.rip_ears.clear()
 
     def drm_exists(self, patch: int) -> bool:
         """Check if a drumkit on the specified MIDI patch exists."""
@@ -250,45 +154,43 @@ class Decoder(object):
     def get_smp(self, smp: Sample, dct_head: DirectHeader,
                 smp_head: SampleHeader, use_readstr: bool) -> None:
         """UNKNOWN"""
-        with smp as D:
-            D.smp_id = dct_head.smp_head
-            sid = D.smp_id
-            if self.smp_exists(sid) is False:
-                self.smp_pool.add(str(sid))
-                if D.output == DirectTypes.DIRECT:
-                    smp_head = rd_smp_head(1, File.gba_ptr_to_addr(sid))
-                    with self.smp_pool[str(sid)] as smp:
-                        smp.size = smp_head.size
-                        smp.freq = smp_head.freq * 64
-                        smp.loop_start = smp_head.loop
-                        smp.loop = smp_head.flags > 0
-                        smp.gb_wave = False
-                        self.log.debug(
-                            f'{smp_head} {sid:#x} {File.gba_ptr_to_addr(sid):#x}'
-                        )
-                        # raise Exception
-                        if use_readstr:
-                            smp.smp_data = self.wfile.rd_str(smp_head.size)
-                        else:
-                            smp.smp_data = self.wfile._file.tell()
-                else:
-                    with self.smp_pool[str(sid)] as smp:
-                        smp.size = 32
-                        smp.freq = self.GB_WAV_BASE_FREQ
-                        smp.loop_start = 0
-                        smp.loop = True
-                        smp.gb_wave = True
-                        tsi = self.wfile.rd_str(16, File.gba_ptr_to_addr(sid))
-                        #print(tsi)
-                        smp.smp_data = ""
-                        for ai in range(32):
-                            bi = ai % 2
-                            l = int(ai / 2)
-                            smp.smp_data += chr(
-                                int((((0 if tsi[l:l + 1] ==
-                                       '' else ord(tsi[l:l + 1])) //
-                                      (16**bi)) % 16) *
-                                    (self.GB_WAV_MULTI * 16)))
+        smp.smp_id = dct_head.smp_head
+        sid = smp.smp_id
+        if self.smp_exists(sid):
+            return
+        self.smp_pool.add(str(sid))
+        w_smp = self.smp_pool[str(sid)]
+        smp_head = rd_smp_head(1, File.gba_ptr_to_addr(sid))
+        if smp.output == DirectTypes.DIRECT:
+            w_smp.size = smp_head.size
+            w_smp.freq = smp_head.freq * 64
+            w_smp.loop_start = smp_head.loop
+            w_smp.loop = smp_head.flags > 0
+            w_smp.gb_wave = False
+            self.log.debug(
+                f'{smp_head} {sid:#x} {File.gba_ptr_to_addr(sid):#x}'
+            )
+            # raise Exception
+            if use_readstr:
+                w_smp.smp_data = self.wfile.rd_str(smp_head.size)
+            else:
+                w_smp.smp_data = self.wfile._file.tell()
+        else:
+            w_smp.size = 32
+            w_smp.freq = self.GB_WAV_BASE_FREQ
+            w_smp.loop_start = 0
+            w_smp.loop = True
+            w_smp.gb_wave = True
+            tsi = self.wfile.rd_str(16, File.gba_ptr_to_addr(sid))
+            w_smp.smp_data = ""
+            for ai in range(32):
+                bi = ai % 2
+                l = int(ai / 2)
+                w_smp.smp_data += chr(
+                    int((((0 if tsi[l:l + 1] ==
+                            '' else ord(tsi[l:l + 1])) //
+                            (16**bi)) % 16) *
+                        (self.GB_WAV_MULTI * 16)))
 
     get_mul_smp = get_smp
 
@@ -306,10 +208,6 @@ class Decoder(object):
                 return True
         return False
 
-    def note_in_channel(self, note_id: int, chnl_id: int) -> bool:
-        """Check if a note belongs to a channel."""
-        return self.note_arr[note_id].parent == chnl_id
-
     def patch_exists(self, lp: int) -> bool:
         """UKNOWN"""
         for dct in self.directs:
@@ -324,7 +222,7 @@ class Decoder(object):
         return False
 
     # yapf: disable
-    def play_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None,
+    def load_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None,
                   record: bool = False, record_to: str = "midiout.mid"):
         """Play a song from an AGB rom that uses the Sappy Sound Engine."""
         # yapf: enable
@@ -422,7 +320,6 @@ class Decoder(object):
                 if pc >= loop_offset and self.channels[i].loop_ptr == -1 and loop_offset != -1:
                     self.channels[i].loop_ptr = self.channels[i].evt_queue.count
                 c = self.wfile.rd_byte()
-                #print(hex(c))
                 if (c != 0xB9 and 0xB5 <= c < 0xC5) or c == 0xCD:
                     D = self.wfile.rd_byte()
                     if c == 0xBC:
@@ -484,8 +381,6 @@ class Decoder(object):
                     while not g:
                         self.wfile.rd_addr = pc
                         D = self.wfile.rd_byte()
-                        #self.wfile.rd_addr = pc
-                        #print('d', hex(D))
                         if D >= 0x80:
                             if nc == 0:
                                 pn = lln[nc] + tR
@@ -499,12 +394,10 @@ class Decoder(object):
                             lln[nc] = D
                             pc += 1
                             e = self.wfile.rd_byte()
-                            #print(hex(e))
                             if e < 0x80:
                                 llv[nc] = e
                                 pc += 1
                                 F = self.wfile.rd_byte()
-                                #print(hex(F))
                                 if F >= 0x80:
                                     F = lla[nc]
                                     g = True
@@ -705,7 +598,6 @@ class Decoder(object):
                                 self.log.debug(
                                     f'| PGM: {pc:#x} | CMD: {c:#x} | ML EXIST | MULTI HEAD | {self.mul_head}'
                                 )
-                                #print(self.kmap_exists(self.insts[str(lp)].kmaps,pn), self.insts[str(lp)].kmaps.data['48'].key, pn)
                                 if self.kmap_exists(self.insts[str(lp)].kmaps,
                                                     pn) is False:
                                     self.insts[str(lp)].kmaps.add(
@@ -760,7 +652,6 @@ class Decoder(object):
                                         )
 
                 elif 0x00 <= c < 0x80:
-                    #print('arr', hex(lc))
                     if lc < 0xCF:
                         self.channels[i].evt_queue.add(cticks, lc, c, 0, 0)
                         self.log.debug(
@@ -771,7 +662,6 @@ class Decoder(object):
                         c = lc
                         g = False
                         nc = 0
-                        #pc += 1
                         while g is False:
                             self.wfile.rd_addr = pc
                             D = self.wfile.rd_byte()
@@ -1057,151 +947,108 @@ class Decoder(object):
             f'+---------------+-----------+----------+------------+------------+------------+------------+------------+------------+'
         )
         self.log.debug(f'+------+------------+------------+')
-        fmod.FSOUND_Init(44100, 64, 0)
+        systemInit(44100, 64, 0)
         self.log.debug(
-            f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | INIT       |')
-        fmod.FSOUND_SetSFXMasterVolume(self._gbl_vol)
+            f'| FMOD | CODE: {getError():4} | INIT       |')
+        setMasterVolume(self._gbl_vol)
         self.log.debug(
-            f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET VOL    | {self.gbl_vol}'
+            f'| FMOD | CODE: {getError():4} | SET VOL    | {self.gbl_vol}'
         )
-        quark = 0
-        csm = FSoundChannelSampleMode
-        sm = FSoundModes
         for smp in self.smp_pool:
             smp: Sample
-            quark += 1
             self.log.debug(
-                f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SMP ID: {quark:2} | S{self.val(smp.smp_data)} | GB:  {repr(smp.gb_wave):<5} |'
+                f'| FMOD | CODE: {getError():4} | S{self.val(smp.smp_data)} | GB:  {repr(smp.gb_wave):<5} |'
             )
             if smp.gb_wave is True:
                 if self.val(smp.smp_data) == 0:
                     with open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
-                    smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                        int(csm.FSOUND_FREE),
-                        'temp.raw'.encode(encoding='ascii'),
-                        int(sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
-                            sm.FSOUND_LOOP_NORMAL + sm.FSOUND_MONO +
-                            sm.FSOUND_UNSIGNED),
-                        0,
-                        0)
+                    smp.fmod_smp = self.load_sample('temp.raw')
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                        f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
                     )
-                    fmod.FSOUND_Sample_SetLoopPoints(int(smp.fmod_smp), 0, 31)
+                    setLoopPoints(smp.fmod_smp, 0, 31)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (0, 31)'
+                        f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 31)'
                     )
-                    os.remove('temp.raw')
+                    remove('temp.raw')
                 else:
-                    smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                        int(csm.FSOUND_FREE),
-                        fpath.encode(encoding='ascii'),
-                        int(sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
-                            sm.FSOUND_LOOP_NORMAL + sm.FSOUND_MONO +
-                            sm.FSOUND_UNSIGNED),
-                        int(smp.smp_data),
-                        int(smp.size))
+                    smp.fmod_smp = self.load_sample(fpath, smp.smp_data, smp.size)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                        f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
                     )
-                    fmod.FSOUND_Sample_SetLoopPoints(int(smp.fmod_smp), 0, 31)
+                    setLoopPoints(smp.fmod_smp, 0, 31)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (0, 31)'
+                        f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 31)'
                     )
             else:
                 if self.val(smp.smp_data) == 0:
                     with open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
-                    smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                        int(csm.FSOUND_FREE),
-                        'temp.raw'.encode(encoding='ascii'),
-                        int(sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
-                            (sm.FSOUND_LOOP_NORMAL if smp.loop else 0
-                            ) + sm.FSOUND_MONO + sm.FSOUND_SIGNED),
-                        0,
-                        0)
+                    smp.fmod_smp = self.load_sample('temp.raw', loop=smp.loop, gb_wave=False)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                        f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
                     )
-                    fmod.FSOUND_Sample_SetLoopPoints(
-                        int(smp.fmod_smp), int(smp.loop_start),
-                        int(smp.size - 1))
+                    setLoopPoints(smp.fmod_smp, smp.loop_start, smp.size - 1)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | ({smp.loop_start},  {smp.size - 1})'
+                        f'| FMOD | CODE: {getError():4} | SET LOOP   | ({smp.loop_start},  {smp.size - 1})'
                     )
-                    os.remove('temp.raw')
+                    remove('temp.raw')
                 else:
-                    smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                        int(csm.FSOUND_FREE),
-                        fpath.encode(encoding='ascii'),
-                        int(sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
-                            (sm.FSOUND_LOOP_NORMAL if smp.loop else 0
-                            ) + sm.FSOUND_MONO + sm.FSOUND_SIGNED),
-                        int(smp.smp_data),
-                        int(smp.size))
+                    smp.fmod_smp = self.load_sample(fpath, smp.smp_data, smp.size, smp.loop, False)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                        f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
                     )
-                    fmod.FSOUND_Sample_SetLoopPoints(
-                        int(smp.fmod_smp), int(smp.loop_start),
-                        int(smp.size - 1))
+                    setLoopPoints(smp.fmod_smp, smp.loop_start, smp.size - 1)
                     self.log.debug(
-                        f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (0, 31)'
+                        f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 31)'
                     )
         for i in range(10):
-            self.smp_pool.add(f'noise0{i}')
-            f_nse = f'noise0{i}.raw'.encode(encoding='ascii')
-            with self.smp_pool[f'noise0{i}'] as smp:
-                random.seed(time.time())
+            nse = f'noise0{i}'
+            self.smp_pool.add(nse)
+            f_nse = f'{nse}.raw'
+            with self.smp_pool[nse] as smp:
                 smp.smp_data = self.nse_wavs[0][i]
                 smp.freq = 7040
                 smp.size = 16384
                 with open_new_file(f_nse, 2) as f:
                     f.wr_str(smp.smp_data)
-                smp.smp_data = ''
-                smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                    csm.FSOUND_FREE, f_nse,
-                    sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
-                    + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0)
+                smp.fmod_smp = self.load_sample(f_nse)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD NSE0{i} | S{smp.fmod_smp}'
+                    f'| FMOD | CODE: {getError():4} | LOAD NSE0{i} | S{smp.fmod_smp}'
                 )
-                fmod.FSOUND_Sample_SetLoopPoints(int(smp.fmod_smp), 0, 16383)
+                setLoopPoints(smp.fmod_smp, 0, 16383)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (0, 16383)'
+                    f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 16383)'
                 )
-                os.remove(f_nse)
+                remove(f_nse)
 
-            self.smp_pool.add(f'noise1{i}')
-            f_nse = f'noise1{i}.raw'.encode(encoding='ascii')
-            with self.smp_pool[f'noise1{i}'] as smp:
+            nse = f'noise1{i}'
+            self.smp_pool.add(nse)
+            f_nse = f'{nse}.raw'
+            with self.smp_pool[nse] as smp:
                 smp.smp_data = self.nse_wavs[1][i]
                 smp.freq = 7040
                 smp.size = 256
                 with open_new_file(f_nse, 2) as f:
                     f.wr_str(smp.smp_data)
-                smp.smp_data = ''
-                smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                    csm.FSOUND_FREE, f_nse,
-                    sm.FSOUND_8BITS + sm.FSOUND_LOADRAW + sm.FSOUND_LOOP_NORMAL
-                    + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED, 0, 0)
+                smp.fmod_smp = self.load_sample(f_nse)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD NSE1{i} | S{smp.fmod_smp}'
+                    f'| FMOD | CODE: {getError():4} | LOAD NSE1{i} | S{smp.fmod_smp}'
                 )
-                fmod.FSOUND_Sample_SetLoopPoints(int(smp.fmod_smp), 0, 255)
+                setLoopPoints(smp.fmod_smp, 0, 255)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (0, 255)'
+                    f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 255)'
                 )
-                os.remove(f_nse)
+                remove(f_nse)
 
         b1 = chr(int(0x80 + 0x7F * self.GB_SQ_MULTI))
         b2 = chr(int(0x80 - 0x7F * self.GB_SQ_MULTI))
         for mx2 in range(4):
             sq = f'square{mx2}'
-            f_sq = f'{sq}.raw'.encode('ascii')
+            f_sq = f'{sq}.raw'
             self.smp_pool.add(sq)
-            with self.smp_pool[f'square{mx2}'] as smp:
+            with self.smp_pool[sq] as smp:
                 if mx2 == 3:
                     smp.smp_data = "".join([b1] * 24 + [b2] * 8)
                 else:
@@ -1211,19 +1058,15 @@ class Decoder(object):
                 smp.size = 32,
                 with open_new_file(f_sq, 2) as f:
                     f.wr_str(smp.smp_data)
-                smp.smp_data = '',
-                smp.fmod_smp = fmod.FSOUND_Sample_Load(
-                    csm.FSOUND_FREE, f_sq, sm.FSOUND_8BITS + sm.FSOUND_LOADRAW +
-                    sm.FSOUND_LOOP_NORMAL + sm.FSOUND_MONO + sm.FSOUND_UNSIGNED,
-                    0, 0)
+                smp.fmod_smp = self.load_sample(f_sq, 0, 0)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | LOAD SQRE{mx2} | S{smp.fmod_smp}'
+                    f'| FMOD | CODE: {getError():4} | LOAD SQRE{mx2} | S{smp.fmod_smp}'
                 )
-                fmod.FSOUND_Sample_SetLoopPoints(int(smp.fmod_smp), 0, 31)
+                setLoopPoints(smp.fmod_smp, 0, 31)
                 self.log.debug(
-                    f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | SET LOOP   | (00, 31)'
+                    f'| FMOD | CODE: {getError():4} | SET LOOP   | (00, 31)'
                 )
-                os.remove(f_sq)
+                remove(f_sq)
 
         self.gb1_chan = 255
         self.gb2_chan = 255
@@ -1231,16 +1074,24 @@ class Decoder(object):
         self.gb4_chan = 255
 
         self.tempo = 120
-        self.last_tempo = -1
         self.incr = 0
         self.wfile.close()
-        self.ttl_ticks = 0
-        self.ttl_msecs = 0
-        self.beats = 0
         self.log.debug(
-            f'| FMOD | CODE: {fmod.FSOUND_GetError():4} | FINISH     |')
+            f'| FMOD | CODE: {getError():4} | FINISH     |')
         self.log.debug(f'+------+------------+------------+')
         self.log.debug(f'+------------+------------+------------+')
+
+    def load_sample(self, fpath: str, smp_data: Union[int, str] = 0, size: int = 0, loop: bool = True, gb_wave: bool=True):
+        mask = FSoundModes._8BITS + FSoundModes.LOADRAW + FSoundModes.MONO
+        if loop:
+            mask += FSoundModes.LOOP_NORMAL
+        if gb_wave:
+            mask += FSoundModes.UNSIGNED
+        else:
+            mask += FSoundModes.SIGNED
+        fpath = fpath.encode('ascii')
+        mode = FSoundChannelSampleMode.FSOUND_FREE
+        return sampleLoad(mode, fpath, mask, smp_data, size)
 
     def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
@@ -1249,657 +1100,551 @@ class Decoder(object):
                 return True
         return False
 
-    def set_mpatch_map(self, ind: int, inst: int, transpose: int) -> None:
-        """Bind a MIDI instrument to a specified MIDI key."""
-        self.mpatch_map[ind] = inst
-        self.mpatch_tbl[ind] = transpose
-
-    def set_mdrum_map(self, ind: int, new_drum: int) -> None:
-        """Bind a MIDI drum to a specified MIDI key."""
-        self.mdrum_map[ind] = new_drum
-
     def stop_song(self):
         """Stop playing a song."""
         try:
             File.from_id(1).close()
         except AttributeError:
             pass
-        fmod.FSOUND_Close()
+        systemClose()
 
-    def evt_processor_timer(self, msecs: int) -> None:
-        ep = 0
-        mutethis = False
-        self.ttl_msecs += msecs
-        self.log.debug(
-            f'| WAIT TICK  | MS: {self.ttl_msecs:<6} | TICK: {self.tick_ctr:<5}'
-        )
-        if self.tick_ctr > 0:
-            for i in range(31, -1, -1):
-                with self.note_arr[i] as item:
-                    if item.enable and item.wait_ticks > 0:
-                        item.wait_ticks -= (self.tick_ctr - self.last_tick)
-                    if item.wait_ticks <= 0 and item.enable is True and item.note_off is False:
-                        if self.channels[item.parent].sustain is False:
-                            item.note_off = True
-            in_for = True
-            for plat in range(self.channels.count):
-                #print(i, self.channels[i].enable)
-                if self.channels[plat].enable is False:
-                    #print(plat)
-                    self.log.debug(f'| CHAN: {i:>4} | SKIP EXEC  |')
-                    continue
-                self.log.debug(f'| CHAN: {i:>4} | BEGIN EXEC |')
-                with self.channels[plat] as chan:
-                    chan: Channel
-                    # for ep in range(self.rip_ears.count):
-                    #     if self.rip_ears[ep] == chan.patch_num:
-                    #         chan.mute = True
-                    #         self.log.debug(f'| CHAN: {i:>4} | MUTE CHAN  |')
-                    #         break
+    def update_notes(self) -> None:
+        for item in self.note_arr:
+            item: Note
+            if item.enable and item.wait_ticks > 0:
+                item.wait_ticks -= 1
+            elif item.wait_ticks <= 0 and item.enable is True and item.note_off is False:
+                if self.channels[item.parent].sustain is False:
+                    item.reset()
 
-                    if chan.wait_ticks > 0:
-                        chan.wait_ticks -= (self.tick_ctr - self.last_tick)
+    def update_channels(self) -> None:
+        in_for = True
+        for plat, chan in enumerate(self.channels):
+            if chan.enable is False:
+                self.log.debug(f'| CHAN: {plat:>4} | SKIP EXEC  |')
+                continue
+            self.log.debug(f'| CHAN: {plat:>4} | BEGIN EXEC |')
+            if chan.wait_ticks > 0:
+                chan.wait_ticks -= 1
+                self.log.debug(
+                    f'| CHAN: {plat:>4} | CMD: NONE  | DELTA WAIT | TIME: {chan.wait_ticks:<5}'
+                )
+            while chan.wait_ticks <= 0:
+                evt_queue: Event = chan.evt_queue[chan.pgm_ctr]
+                cmd_byte = evt_queue.cmd_byte
+                args = evt_queue.arg1, evt_queue.arg2, evt_queue.arg3
+
+                if cmd_byte in (0xB1, 0xB6):
+                    chan.enable = False
+                    chan.sustain = False
+                    in_for = False
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | STOP EXEC  |'
+                    )
+                    return
+                elif cmd_byte == 0xB9:
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | COND JUMP  |'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBA:
+                    chan.priority = args[0]
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBB:
+                    self.tempo = args[0] * 2
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET TEMPO  | TEMPO: {self.tempo:3}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBC:
+                    chan.transpose = sbyte_to_int(args[0])
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET TRNPSE | TRNPSE: {chan.transpose:2}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBD:
+                    chan.patch_num = args[0]
+                    if self.dct_exists(self.directs, chan.patch_num):
+                        chan.output = self.directs[str(chan.patch_num)].output
+                    elif self.inst_exists(chan.patch_num):
+                        chan.output = ChannelTypes.MUL_SMP
+                    elif self.drm_exists(chan.patch_num):
+                        chan.output = ChannelTypes.DRUMKIT
+                    else:
+                        chan.output = ChannelTypes.NULL
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET OUTPUT | PATCH: {chan.patch_num:3} | T: {chan.output.name:>7}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBE:
+                    chan.main_vol = args[0]
+
+                    for nid in chan.notes:
+                        note = self.note_arr[nid.note_id]
+                        print('be', note, note.parent, plat)
+                        #if note.enable is True and note.parent == plat:
+                        if not note.enable or note.parent != plat:
+                            continue
+                        iv = note.velocity / 0x7F
+                        cv = chan.main_vol / 0x7F
+                        ie = note.env_pos / 0xFF
+                        dav = iv * cv * ie * 255
+                        vol = 0 if chan.mute else int(dav)
+                        setVolume(note.fmod_channel, vol)
                         self.log.debug(
-                            f'| CHAN: {i:>4} | CMD: NONE  | DELTA WAIT | TIME: {chan.wait_ticks:<5}'
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {getError():4} | SET VOLUME | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | VOL: {chan.main_vol:5} | DAV: {dav:5}'
                         )
-                    while chan.wait_ticks <= 0:
-                        cmd_byte = chan.evt_queue[chan.pgm_ctr].cmd_byte
-                        if cmd_byte == 0xB1:
-                            chan.enable = False
-                            in_for = False
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | STOP EXEC  |'
-                            )
-                            break
-                        elif cmd_byte == 0xB9:
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | COND JUMP  |'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xBB:
-                            self.tempo = chan.evt_queue[chan.pgm_ctr].arg1 * 2
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET TEMPO  | TEMPO: {self.tempo:3}'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xBC:
-                            chan.transpose = sbyte_to_int(
-                                chan.evt_queue[chan.pgm_ctr].arg1)
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET TRNPSE | SHIFT: {chan.transpose:3}'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xBD:
-                            chan.patch_num = chan.evt_queue[chan.pgm_ctr].arg1
-                            if self.dct_exists(self.directs, chan.patch_num):
-                                chan.output = self.directs[str(
-                                    chan.patch_num)].output
-                            elif self.inst_exists(chan.patch_num):
-                                chan.output = ChannelTypes.MUL_SMP
-                            elif self.drm_exists(chan.patch_num):
-                                chan.output = ChannelTypes.DRUMKIT
-                            else:
-                                chan.output = ChannelTypes.NULL
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET OUTPUT | PATCH: {chan.patch_num:3} | T: {chan.output.name:>7}'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xBE:
-                            chan.main_vol = chan.evt_queue[chan.pgm_ctr].arg1
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xBF:
+                    chan.panning = args[0]
+                    pan = chan.panning * 2
+                    for nid in chan.notes:
+                        note = self.note_arr[nid.note_id]
+                        print('bf', note, note.parent, plat)
+                        if not note.enable or note.parent != plat:
+                            continue
+                        setPan(note.fmod_channel, pan)
+                        self.log.debug(
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {getError():4} | SET PAN    | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | PAN: {chan.panning:5} | DAP: {pan:5}'
+                        )
+                    chan.pgm_ctr += 1
+                elif cmd_byte in (0xC0, 0xC1):
+                    if cmd_byte == 0xC0:
+                        chan.pitch_bend = args[0]
+                    else:
+                        chan.pitch_range = sbyte_to_int(args[0])
+                    chan.pgm_ctr += 1
+                    for nid in chan.notes:
+                        note: Note = self.note_arr[nid.note_id]
+                        print('c0', note, note.parent, plat)
+                        if not note.enable or note.parent != plat:
+                            continue
+                        pitch = (
+                            chan.pitch_bend - 0x40) / 0x40 * chan.pitch_range
+                        freq = int(note.freq * math.pow(BASE, pitch))
+                        setFrequency(note.fmod_channel, freq)
+                        self.log.debug(
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | PBEND      | CODE: {getError():4} | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | BEND: {chan.pitch_bend:4} | DAP: {freq:5}'
+                        )
+                elif cmd_byte == 0xC2:
+                    chan.vib_rate = chan.evt_queue[chan.pgm_ctr].arg1
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET VIBDP  | DEPTH: {chan.vib_rate:3}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xC4:
+                    chan.vib_depth = chan.evt_queue[chan.pgm_ctr].arg1
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET VIBRT  | RATE: {chan.vib_depth:4}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xCE:
+                    chan.sustain = False
+                    for nid in chan.notes:
+                        note: Note = self.note_arr[nid.note_id]
+                        print('ce', note, note.parent, plat)
+                        if not note.enable or note.note_off:
+                            continue
+                        note.reset()
+                        self.log.debug(
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#6x} | CTRL: {cmd_byte:<#4x} | NOTE OFF   | NOTE: {nid.note_id:>4}'
+                        )
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | NOTE OFF   | '
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte == 0xB3:
+                    chan.sub_ctr += 1
+                    chan.rtn_ptr += 1
+                    chan.pgm_ctr = chan.subs[chan.sub_ctr].evt_q_ptr
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CALL SUB   | RTN: {chan.rtn_ptr:<#5x}'
+                    )
+                    chan.in_sub = True
+                elif cmd_byte == 0xB4:
+                    if chan.in_sub:
+                        chan.pgm_ctr = chan.rtn_ptr
+                        chan.in_sub = False
+                        self.log.debug(f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | END SUB    |')
+                    else:
+                        chan.pgm_ctr += 1
+                elif cmd_byte == 0xB2:
+                    self.just_looped = True
+                    chan.in_sub = False
+                    chan.pgm_ctr = chan.loop_ptr
+                    self.log.debug(f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | JUMP ADDR  | PTR: {chan.loop_ptr:<#5x}')
+                elif cmd_byte >= 0xCF:
+                    ll = stlen_to_ticks(cmd_byte - 0xCF) + 1
+                    if cmd_byte == 0xCF:
+                        chan.sustain = True
+                        ll = -1
+                    nn, vv, uu = args
+                    self.note_q.add(nn, vv, plat, uu, ll, chan.patch_num)
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | ADD NOTE   | NOTE: {note_to_name(nn):>4} | VEL: {vv:5} | LEN: {ll:5} | PATCH: {chan.patch_num:3}'
+                    )
+                    chan.pgm_ctr += 1
+                elif cmd_byte <= 0xB0:
+                    if self.just_looped:
+                        self.just_looped = False
+                        chan.wait_ticks = 0
+                        continue
+                    chan.pgm_ctr += 1
+                    n_evt_queue = chan.evt_queue[chan.pgm_ctr]
+                    if chan.pgm_ctr > 0:
+                        chan.wait_ticks = n_evt_queue.ticks - evt_queue.ticks
+                    else:
+                        chan.wait_ticks = n_evt_queue.ticks
+                else:
+                    print(hex(cmd_byte), evt_queue)
+                    #input()
+                    self.log.debug(
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CONT EXEC  |'
+                    )
+                    chan.pgm_ctr += 1
+            if not in_for:
+                self.log.debug(f'| CHAN: {plat:>4} | STOP EXEC  | ')
+                break
 
-                            for j in range(len(chan.notes)):
-                                item = chan.notes[j]
-                                print('be', self.note_arr[item.note_id], self.note_arr[item.note_id].parent, plat)
-                                if self.note_arr[item.
-                                                 note_id].enable is True and self.note_arr[item.
-                                                                                           note_id].parent == plat:
-                                    dav = (
-                                        self.note_arr[item.note_id].velocity / 0x7F
-                                    ) * (chan.main_vol / 0x7F) * (
-                                        self.note_arr[item.note_id].env_pos / 0xFF) * 255
-                                    vol = int(dav * 0 if chan.mute else dav * 1)
+    def update_vibrato(self) -> None:
+        for chan in self.channels:
+            if not chan.enable or chan.vib_rate == 0 or chan.vib_depth == 0:
+                continue
+            for nid in chan.notes:
+                item = self.note_arr[nid.note_id]
+                if not item.enable or item.note_off:
+                    continue
+                v_pos = math.sin(math.pi * item.vib_pos) * chan.vib_depth
+                pitch = (
+                    chan.pitch_bend - 0x40 + v_pos) / 0x40 * chan.pitch_range
+                freq = int(item.freq * math.pow(BASE, pitch))
+                setFrequency(item.fmod_channel, freq)
+                item.vib_pos += 1 / (96 / chan.vib_rate)
+                item.vib_pos = math.fmod(item.vib_pos, 2)
 
-                                    if mutethis:
-                                        dav = 0
-                                    fmod.FSOUND_SetVolume(
-                                        self.note_arr[item.note_id]
-                                        .fmod_channel, vol)
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {fmod.FSOUND_GetError():4} | SET VOLUME | FMOD: {self.note_arr[item.note_id].fmod_channel:4} | NOTE: {item.note_id:>4} | VOL: {chan.main_vol:5} | DAV: {dav:5}'
-                                    )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xBF:
-                            chan.panning = chan.evt_queue[chan.pgm_ctr].arg1
-                            for j in range(len(chan.notes)):
-                                item = chan.notes[j]
-                                print('bf', self.note_arr[item.note_id],
-                                      self.note_arr[item.note_id].parent, plat)
-                                if self.note_arr[item.
-                                                 note_id].enable and self.note_arr[item.
-                                                                                   note_id].parent == plat:
-                                    fmod.FSOUND_SetPan(self.note_arr[
-                                        item.note_id].fmod_channel,
-                                                       int(chan.panning * 2))
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET PAN    | CODE: {fmod.FSOUND_GetError():4} | FMOD: {self.note_arr[item.note_id].fmod_channel:4} | NOTE: {item.note_id:>4} | PAN: {chan.panning:5} | DAP: {chan.panning * 2:5}'
-                                    )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xC0:
-                            chan.pitch_bend = chan.evt_queue[chan.pgm_ctr].arg1
-                            chan.pgm_ctr += 1
-                            for j in range(len(chan.notes)):
-                                item = chan.notes[j]
-                                print('c0', self.note_arr[item.note_id],
-                                      self.note_arr[item.note_id].parent, plat)
+    def play_notes(self) -> None:
+        cleared_channel = [False for i in range(len(self.channels))]
+        for item in self.note_q:
+            x = self.free_note()
+            self.log.debug(
+                f'| FREE NOTE  | NOTE: {x:4} | ID: {note_to_name(item.note_num):>6} |'
+            )
+            if x == 255:
+                continue
 
-                                if self.note_arr[item.note_id].enable and self.note_arr[item.
-                                                                             note_id].parent == plat:
-                                    freq = int(self.note_arr[item.note_id].freq
-                                               * math.pow(
-                                                   math.pow(2, 1 / 12),
-                                                   (chan.pitch_bend - 0x40
-                                                   ) / 0x40 * chan.pitch_range))
-                                    fmod.FSOUND_SetFrequency(
-                                        self.note_arr[item.note_id]
-                                        .fmod_channel, freq)
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET PBEND  | CODE: {fmod.FSOUND_GetError():4} | FMOD: {self.note_arr[item.note_id].fmod_channel:4} | NOTE: {item.note_id:>4} | BEND: {chan.pitch_bend:4} | DAP: {freq:5}'
-                                    )
-                        elif cmd_byte == 0xC1:
-                            chan.pitch_range = sbyte_to_int(
-                                chan.evt_queue[chan.pgm_ctr].arg1)
-                            chan.pgm_ctr += 1
-                            for j in range(len(chan.notes)):
-                                item = chan.notes[j]
-                                print('c1', self.note_arr[item.note_id], self.note_arr[item.note_id].parent, plat)
-                                if self.note_arr[item.note_id].enable and self.note_arr[item.
-                                                                             note_id].parent == plat:
+            self.note_arr[x] = item
+            with self.channels[item.parent] as chan:
+                if cleared_channel[item.parent] is False:
+                    cleared_channel[item.parent] = True
 
-                                    freq = self.note_arr[
-                                        item.note_id].freq * math.pow(
-                                            math.pow(2, 1 / 12),
-                                            (chan.pitch_bend - 0x40
-                                            ) / 0x40 * chan.pitch_range)
-                                    fmod.FSOUND_SetFrequency(
-                                        self.note_arr[item.note_id]
-                                        .fmod_channel, math.ceil(freq))
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET BENDRG | CODE: {fmod.FSOUND_GetError():4} | FMOD: {self.note_arr[item.note_id].fmod_channel:4} | NOTE: {item.note_id:>4} | BEND: {chan.pitch_bend:4} | DAP: {freq:5}'
-                                    )
-                        elif cmd_byte == 0xC2:
-                            chan.vib_depth = chan.evt_queue[chan.pgm_ctr].arg1
+                    for nid in chan.notes:
+                        note = self.note_arr[nid.note_id]
+                        if note.enable is True and note.note_off is False:
+                            if note.wait_ticks == -1:
+                                pass
+                            elif note.wait_ticks > -1:
+                                note.reset()
+
                             self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET VIBDP  | DEPTH: {chan.vib_depth:3}'
+                                f'| CHAN: {item.parent:>4} | NOTE: {nid.note_id:4} | NOTE OFF   |'
                             )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xC4:
-                            chan.vib_rate = chan.evt_queue[chan.pgm_ctr].arg1
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET VIBRT  | RATE: {chan.vib_rate:4}'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xCE:
-                            chan.sustain = False
-                            for j in range(len(chan.notes)):
-                                item = chan.notes[j]
-                                print('ce', self.note_arr[item.note_id],
-                                      self.note_arr[item.note_id].parent, plat)
-                                if self.note_arr[item.note_id].enable is True and self.note_arr[item.
-                                                                                     note_id].note_off is False:
-                                    self.note_arr[item.note_id].note_off = True
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#6x} | CTRL: {cmd_byte:<#4x} | NOTE OFF   | NOTE: {item.note_id:>4}'
-                                    )
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | NOTE OFF   | '
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte == 0xB3:
-                            chan.sub_ctr = chan.sub_ctr + 1
-                            chan.rtn_ptr = chan.pgm_ctr + 1
-                            chan.pgm_ctr = chan.subs[chan.sub_ctr].evt_q_ptr
-                            self.log.debug(
-                                'CMD 0xB3 call sub: %s ptr: %s chan: %s',
-                                chan.sub_ctr, chan.rtn_ptr, chan.pgm_ctr)
-                            chan.in_sub = True
-                        elif cmd_byte == 0xB4:
-                            if chan.in_sub:
-                                chan.pgm_ctr = chan.rtn_ptr
-                                chan.in_sub = False
-                                self.log.debug('CMD 0xB4 end sub chan: %s',
-                                               plat)
-                            else:
-                                chan.pgm_ctr += 1
-                        elif cmd_byte == 0xB2:
-                            self.just_looped = True
-                            chan.in_sub = False
-                            chan.pgm_ctr = chan.loop_ptr
-                            self.log.debug('CMD 0xB2 jump to addr: %s',
-                                           chan.pgm_ctr)
-                        elif cmd_byte >= 0xCF:
-                            ll = stlen_to_ticks(cmd_byte - 0xCF)
-                            #chan.sustain = False
-                            if cmd_byte == 0xCF:
-                                chan.sustain = True
-                                ll = 0
-                            nn = chan.evt_queue[chan.pgm_ctr].arg1
-                            vv = chan.evt_queue[chan.pgm_ctr].arg2
-                            uu = chan.evt_queue[chan.pgm_ctr].arg3
-                            self.note_q.add(True, 0, nn, 0, vv, plat, uu, 0, 0,
-                                            0, 0, 0, ll, chan.patch_num)
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | ADD NOTE   | NOTE: {note_to_name(nn):>4} | VEL: {vv:5} | LEN: {ll:5} | PATCH: {chan.patch_num:3}'
-                            )
-                            chan.pgm_ctr += 1
-                        elif cmd_byte <= 0xB0:
-                            if self.just_looped:
-                                self.just_looped = False
-                                chan.wait_ticks = 0
-                            else:
-                                chan.pgm_ctr += 1
-                                if chan.pgm_ctr > 1:
-                                    chan.wait_ticks = chan.evt_queue[chan.
-                                                                     pgm_ctr].ticks - chan.evt_queue[chan.
-                                                                                                     pgm_ctr
-                                                                                                     -
-                                                                                                     1].ticks
-                                else:
-                                    chan.wait_ticks = chan.evt_queue[
-                                        chan.pgm_ctr].ticks
+
+                chan.notes.add(x, str(x))
+                pat = item.patch_num
+                nn = item.note_num
+                std_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
+                sqr_out = (DirectTypes.SQUARE1, DirectTypes.SQUARE2)
+                if self.dct_exists(self.directs, pat):
+                    self.note_arr[x].output = self.directs[str(pat)].output
+                    self.note_arr[x].env_attn = self.directs[str(pat)].env_attn
+                    self.note_arr[x].env_dcy = self.directs[str(pat)].env_dcy
+                    self.note_arr[x].env_sus = self.directs[str(pat)].env_sus
+                    self.note_arr[x].env_rel = self.directs[str(pat)].env_rel
+                    self.log.debug(
+                        f'| CHAN: {item.parent:>4} | DCT EXISTS | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
+                    )
+                    if DirectTypes(self.directs[str(pat)].output) in std_out:
+                        das = str(self.directs[str(pat)].smp_id)
+                        #input()
+                        daf = note_to_freq(
+                            nn + (60 - self.directs[str(pat)].drum_key),
+                            self.smp_pool[das].freq)
+                        if self.smp_pool[das].gb_wave:
+                            daf /= 2
+                        self.log.debug(
+                            f'| CHAN: {item.parent:>4} | DCT EXISTS | NOTE: {x:4} | STD OUT    | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
+                        )
+                    elif DirectTypes(self.directs[str(pat)].output) in sqr_out:
+                        das = f'square{self.directs[str(pat)].gb1 % 4}'
+                        daf = note_to_freq(
+                            nn + (60 - self.directs[str(pat)].drum_key))
+                    elif DirectTypes(self.directs[str(pat)]
+                                     .output) == DirectTypes.NOISE:
+                        das = f'noise{self.directs[str(pat)].gb1 % 2}{int(random() * 3)}'
+                        daf = note_to_freq(
+                            nn + (60 - self.directs[str(pat)].drum_key))
+                    else:
+                        das = ''
+                elif self.inst_exists(pat):
+                    dct: Direct = self.insts[str(pat)].directs[str(
+                        self.insts[str(pat)].kmaps[str(nn)].assign_dct)]
+                    self.note_arr[x].output = dct.output
+                    self.note_arr[x].env_attn = dct.env_attn
+                    self.note_arr[x].env_dcy = dct.env_dcy
+                    self.note_arr[x].env_sus = dct.env_sus
+                    self.note_arr[x].env_rel = dct.env_rel
+                    self.log.debug(
+                        f'| CHAN: {item.parent:>4} | INST EXIST | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
+                    )
+                    if dct.output in std_out:
+                        das = str(dct.smp_id)
+                        if dct.fix_pitch:
+                            daf = self.smp_pool[das].freq
                         else:
-                            self.log.debug(
-                                f'| CHAN: {i:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CONT EXEC  |'
-                            )
-                            chan.pgm_ctr += 1
-                    if not in_for:
-                        self.log.debug(f'| CHAN: {i:>4} | STOP EXEC  | ')
-                        break
+                            daf = note_to_freq(nn, -2
+                                               if self.smp_pool[das].gb_wave
+                                               else self.smp_pool[das].freq)
+                        self.log.debug(
+                            f'| CHAN: {item.parent:>4} | INST EXIST | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | DAS: {das:>18} | DAF: {daf:>18}'
+                        )
+                    elif dct.output in sqr_out:
+                        das = f'square{dct.gb1 % 4}'
+                        daf = note_to_freq(nn)
+                    else:
+                        das = ''
+                elif self.drm_exists(pat):
+                    dct: Direct = self.drmkits[str(pat)].directs[str(nn)]
+                    self.note_arr[x].output = dct.output
+                    self.note_arr[x].env_attn = dct.env_attn
+                    self.note_arr[x].env_dcy = dct.env_dcy
+                    self.note_arr[x].env_sus = dct.env_sus
+                    self.note_arr[x].env_rel = dct.env_rel
+                    self.log.debug(
+                        f'| CHAN: {item.parent:>4} | DRM EXISTS | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
+                    )
+                    if dct.output in std_out:
+                        das = str(dct.smp_id)
+                        if dct.fix_pitch and not self.smp_pool[das].gb_wave:
+                            daf = self.smp_pool[das].freq
+                        else:
+                            daf = note_to_freq(dct.drum_key, -2
+                                               if self.smp_pool[das].gb_wave
+                                               else self.smp_pool[das].freq)
+                        self.log.debug(
+                            f'| CHAN: {item.parent:>4} | DRM EXISTS | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
+                        )
+                    elif dct.output in sqr_out:
+                        das = f'square{dct.gb1 % 4}'
+                        daf = note_to_freq(dct.drum_key)
+                    elif dct.output == DirectTypes.NOISE:
+                        das = f'noise{dct.gb1 % 2}{int(random() * 10)}'
+                        daf = note_to_freq(dct.drum_key)
+                    else:
+                        das = ''
+                else:
+                    das = ''
+
+                if das != '':
+                    daf = daf * math.pow(BASE, self.transpose)
+                    dav = (item.velocity / 0x7F) * (chan.main_vol / 0x7F) * 255
+                    out_type = self.note_arr[x].output
+                    if out_type == NoteTypes.SQUARE1:
+                        if self.gb1_chan < 32:
+                            with self.note_arr[self.gb1_chan] as gbn:
+                                gbn: Note
+                                stopSound(gbn.fmod_channel)
+                                self.log.debug(
+                                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SQ1   | F{gbn.fmod_channel:<9}'
+                                )
+                                gbn.fmod_channel = 0
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb1_chan))
+                                gbn.enable = False
+
+                        self.gb1_chan = x
+                    elif out_type == NoteTypes.SQUARE2:
+                        if self.gb2_chan < 32:
+                            with self.note_arr[self.gb2_chan] as gbn:
+                                stopSound(gbn.fmod_channel)
+                                self.log.debug(
+                                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SQ2   | F{gbn.fmod_channel:<9}'
+                                )
+                                gbn.fmod_channel = 0
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb2_chan))
+                                gbn.enable = False
+                        self.gb2_chan = x
+                    elif out_type == NoteTypes.WAVE:
+                        if self.gb3_chan < 32:
+                            with self.note_arr[self.gb3_chan] as gbn:
+                                stopSound(gbn.fmod_channel)
+                                self.log.debug(
+                                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP WAV   | F{gbn.fmod_channel:<9}'
+                                )
+                                gbn.fmod_channel = 0
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb3_chan))
+                                gbn.enable = False
+                        self.gb3_chan = x
+                    elif out_type == NoteTypes.NOISE:
+                        if self.gb4_chan < 32:
+                            with self.note_arr[self.gb4_chan] as gbn:
+                                stopSound(gbn.fmod_channel)
+                                self.log.debug(
+                                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP NSE   | F{gbn.fmod_channel:<9}'
+                                )
+                                gbn.fmod_channel = 0
+                                self.channels[gbn.parent].notes.remove(
+                                    str(self.gb4_chan))
+                                gbn.enable = False
+                        self.gb4_chan = x
+
+                    pitch = (chan.pitch_bend - 0x40) / 0x40 * chan.pitch_range
+                    freq = int(daf * math.pow(BASE, pitch))
+                    pan = chan.panning * 2
+                    vol = 0 if chan.mute else int(dav)
+                    self.note_arr[x].freq = daf
+                    self.note_arr[x].phase = NotePhases.INITIAL
+                    self.note_arr[x].fmod_channel = playSound(
+                        x, self.smp_pool[das].fmod_smp)
+                    setFrequency(self.note_arr[x].fmod_channel,
+                                             freq)
+                    setVolume(self.note_arr[x].fmod_channel, vol)
+                    setPan(self.note_arr[x].fmod_channel, pan)
+                    self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | PLAY SOUND | F{self.note_arr[x].fmod_channel:<9} | DAS: {das:<5}')
+                    self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET FREQ   | DAF: {daf:>5}')
+                    self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET VOLUME | VOL: {vol:>5}')
+                    self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET PAN    | PAN: {pan:>5}')
+
+    def advance_notes(self) -> None:
+        for i in range(31, -1, -1):
+            item = self.note_arr[i]
+            if item.enable is False:
+                continue
+            if item.output == NoteTypes.DIRECT:
+                if item.note_off and item.phase < NotePhases.RELEASE:
+                    item.env_step = 0
+                    item.phase = NotePhases.RELEASE
+                if item.env_step == 0 or (
+                        item.env_pos == item.env_dest) or (
+                            item.env_step == 0 and
+                            (item.env_pos <= item.env_dest)) or (
+                                item.env_step >= 0 and
+                                item.env_pos >= item.env_dest):
+                    phase = item.phase
+                    if phase == NotePhases.INITIAL:
+                        item.phase = NotePhases.ATTACK
+                        item.env_pos = 0
+                        item.env_dest = 255
+                        item.env_step = item.env_attn
+                    elif phase == NotePhases.ATTACK:
+                        item.phase = NotePhases.DECAY
+                        item.env_dest = item.env_sus
+                        item.env_step = (item.env_dcy - 0x100) / 2
+                    elif phase == NotePhases.DECAY:
+                        item.phase = NotePhases.SUSTAIN
+                        item.env_step = 0
+                    elif phase == NotePhases.SUSTAIN:
+                        item.phase = NotePhases.SUSTAIN
+                        item.env_step = 0
+                    elif phase == NotePhases.RELEASE:
+                        item.phase = NotePhases.NOTEOFF
+                        item.env_dest = 0
+                        item.env_step = item.env_rel - 0x100
+                    elif phase == NotePhases.NOTEOFF:
+
+                        stopSound(item.fmod_channel)
+                        self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP DSMP  | F{item.fmod_channel:<9}')
+                        item.fmod_channel = 0
+                        self.channels[item.parent].notes.remove(str(i))
+                        item.enable = False
+                nex = item.env_pos + item.env_step
+                if nex > item.env_dest and item.env_step > 0:
+                    nex = item.env_dest
+                if nex < item.env_dest and item.env_step < 0:
+                    nex = item.env_dest
+                item.env_pos = nex
+                dav = (item.velocity / 0x7F) * (
+                    self.channels[item.parent].main_vol / 0x7F) * (
+                        item.env_pos / 0xFF) * 255
+                vol = int(dav * 0 if self.channels[item.parent]
+                            .mute else dav * 1)
+                setVolume(item.fmod_channel, vol)
+                self.log.debug(
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET DVOL   | VOL: {vol:>5}'
+                )
+            else:
+                if item.note_off and item.phase < NotePhases.RELEASE:
+                    item.env_step = 0
+                    item.phase = NotePhases.RELEASE
+                if item.env_step == 0 or (
+                        item.env_pos == item.env_dest) or (
+                            item.env_step == 0 and
+                            (item.env_pos <= item.env_dest)) or (
+                                item.env_step >= 0 and
+                                item.env_pos >= item.env_dest):
+                    phase: NotePhases = item.phase
+                    if phase == NotePhases.INITIAL:
+                        item.phase = NotePhases.ATTACK
+                        item.env_pos = 0
+                        item.env_dest = 255
+                        item.env_step = 0x100 - (item.env_attn * 8)
+                    elif phase == NotePhases.ATTACK:
+                        item.phase = NotePhases.DECAY
+                        item.env_dest = 255 / item.env_sus * 2
+                        item.env_step = (-item.env_dcy) / 2
+                    elif phase == NotePhases.DECAY:
+                        item.phase = NotePhases.SUSTAIN
+                        item.env_step = 0
+                    elif phase == NotePhases.SUSTAIN:
+                        item.phase = NotePhases.SUSTAIN
+                        item.env_step = 0
+                    elif phase == NotePhases.RELEASE:
+                        item.phase = NotePhases.NOTEOFF
+                        item.env_dest = 0
+                        item.env_step = (0x8 - item.env_rel) * 2
+                    elif phase == NotePhases.NOTEOFF:
+                        out_type = item.output
+                        if out_type == NoteTypes.SQUARE1:
+                            self.gb1_chan = 255
+                        elif out_type == NoteTypes.SQUARE2:
+                            self.gb2_chan = 255
+                        elif out_type == NoteTypes.WAVE:
+                            self.gb3_chan = 255
+                        elif out_type == NoteTypes.NOISE:
+                            self.gb4_chan = 255
+                        stopSound(int(item.fmod_channel))
+                        self.log.debug(
+                            f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SOUND | F{item.fmod_channel:<9}'
+                        )
+                        item.fmod_channel = 0
+                        self.channels[item.parent].notes.remove(str(i))
+                        item.enable = False
+                nex = item.env_pos + item.env_step
+                if nex > item.env_dest and item.env_step > 0:
+                    nex = item.env_dest
+                if nex < item.env_dest and item.env_step < 0:
+                    nex = item.env_dest
+                item.env_pos = nex
+                dav = (item.velocity / 0x7F) * (
+                    self.channels[item.parent].main_vol / 0x7F) * (
+                        item.env_pos / 0xFF) * 255
+                vol = int(dav * 0 if self.channels[item.parent]
+                            .mute else dav * 1)
+                setVolume(item.fmod_channel, vol)
+                self.log.debug(f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET VOLUME | VOL: {vol:>5}')
+
+    def evt_processor_timer(self) -> None:
+        if self.tick_ctr > 0:
+            self.update_notes()
+            self.update_channels()
 
             if self.channels.count > 0:
-                cleared_channel = [False for i in range(len(self.channels))]
-                for item in self.note_q:
-                    x = self.free_note()
-                    self.log.debug(
-                        f'| CHAN: {i:>4} | PLAY NOTE  | NOTE: {note_to_name(item.note_num):>4} |'
-                    )
-                    self.log.debug(
-                        f'| CHAN: {i:>4} | FREE NOTE  | NOTE: {x:4} |')
-                    if x < 32:
-                        self.note_arr[x] = item
-                        #print(item)
-                        with self.channels[item.parent] as chan:
-                            if cleared_channel[item.parent] is False:
-                                cleared_channel[item.parent] = True
-                                for item2 in chan.notes:
-                                    if self.note_arr[item2.
-                                                     note_id].enable is True and self.note_arr[item2.
-                                                                                               note_id].note_off is False:
-                                        self.note_arr[
-                                            item2.note_id].note_off = True
-
-                                        self.log.debug(
-                                            f'| CHAN: {item.parent:>4} | NOTE: {item2.note_id:4} | NOTE OFF   |'
-                                        )
-
-                            chan.notes.add(x, str(x))
-                            pat = item.patch_num
-                            nn = item.note_num
-                            std_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
-                            sqr_out = (DirectTypes.SQUARE1, DirectTypes.SQUARE2)
-                            if self.dct_exists(self.directs, pat):
-                                self.note_arr[x].output = self.directs[str(
-                                    pat)].output
-                                self.note_arr[x].env_attn = self.directs[str(
-                                    pat)].env_attn
-                                self.note_arr[x].env_dcy = self.directs[str(
-                                    pat)].env_dcy
-                                self.note_arr[x].env_sus = self.directs[str(
-                                    pat)].env_sus
-                                self.note_arr[x].env_rel = self.directs[str(
-                                    pat)].env_rel
-                                self.log.debug(
-                                    f'| CHAN: {i:>4} | DCT EXISTS | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
-                                )
-                                if DirectTypes(self.directs[str(pat)]
-                                               .output) in std_out:
-                                    das = str(self.directs[str(pat)].smp_id)
-                                    #input()
-                                    daf = note_to_freq(
-                                        nn +
-                                        (60 - self.directs[str(pat)].drum_key),
-                                        self.smp_pool[das].freq)
-                                    if self.smp_pool[das].gb_wave:
-                                        daf /= 2
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | DCT EXISTS | NOTE: {x:4} | STD OUT    | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
-                                    )
-                                elif DirectTypes(self.directs[str(pat)]
-                                                 .output) in sqr_out:
-                                    das = f'square{self.directs[str(pat)].gb1 % 4}'
-                                    daf = note_to_freq(nn + (
-                                        60 - self.directs[str(pat)].drum_key))
-                                elif DirectTypes(self.directs[str(pat)]
-                                                 .output) == DirectTypes.NOISE:
-                                    das = f'noise{self.directs[str(pat)].gb1 % 2}{int(random.random() * 3)}'
-                                    daf = note_to_freq(nn + (
-                                        60 - self.directs[str(pat)].drum_key))
-                                else:
-                                    das = ''
-                            elif self.inst_exists(pat):
-                                dct: Direct = self.insts[str(pat)].directs[str(
-                                    self.insts[str(pat)].kmaps[str(nn)]
-                                    .assign_dct)]
-                                self.note_arr[x].output = dct.output
-                                self.note_arr[x].env_attn = dct.env_attn
-                                self.note_arr[x].env_dcy = dct.env_dcy
-                                self.note_arr[x].env_sus = dct.env_sus
-                                self.note_arr[x].env_rel = dct.env_rel
-                                self.log.debug(
-                                    f'| CHAN: {i:>4} | INST EXIST | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
-                                )
-                                if dct.output in std_out:
-                                    das = str(dct.smp_id)
-                                    if dct.fix_pitch:
-                                        daf = self.smp_pool[das].freq
-                                    else:
-                                        daf = note_to_freq(
-                                            nn, -2 if self.smp_pool[das].gb_wave
-                                            else self.smp_pool[das].freq)
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | INST EXIST | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | DAS: {das:>18} | DAF: {daf:>18}'
-                                    )
-                                elif dct.output in sqr_out:
-                                    das = f'square{dct.gb1 % 4}'
-                                    daf = note_to_freq(nn)
-                                else:
-                                    das = ''
-                            elif self.drm_exists(pat):
-                                dct: Direct = self.drmkits[str(pat)].directs[
-                                    str(nn)]
-                                self.note_arr[x].output = dct.output
-                                self.note_arr[x].env_attn = dct.env_attn
-                                self.note_arr[x].env_dcy = dct.env_dcy
-                                self.note_arr[x].env_sus = dct.env_sus
-                                self.note_arr[x].env_rel = dct.env_rel
-                                self.log.debug(
-                                    f'| CHAN: {i:>4} | DRM EXISTS | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
-                                )
-                                if dct.output in std_out:
-                                    das = str(dct.smp_id)
-                                    if dct.fix_pitch and not self.smp_pool[das].gb_wave:
-                                        daf = self.smp_pool[das].freq
-                                    else:
-                                        daf = note_to_freq(
-                                            dct.drum_key, -2
-                                            if self.smp_pool[das].gb_wave else
-                                            self.smp_pool[das].freq)
-                                    self.log.debug(
-                                        f'| CHAN: {i:>4} | DRM EXISTS | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
-                                    )
-                                elif dct.output in sqr_out:
-                                    das = f'square{dct.gb1 % 4}'
-                                    daf = note_to_freq(dct.drum_key)
-                                elif dct.output == DirectTypes.NOISE:
-                                    das = f'noise{dct.gb1 % 2}{int(random.random() * 10)}'
-                                    daf = note_to_freq(dct.drum_key)
-                                else:
-                                    das = ''
-                            else:
-                                das = ''
-
-                            if das != '':
-                                daf = daf * math.pow(
-                                    math.pow(2, 1 / 12), self.transpose)
-                                dav = (item.velocity / 0x7F) * (
-                                    chan.main_vol / 0x7F) * 255
-                                if mutethis:
-                                    dav = 0
-                                out_type = self.note_arr[x].output
-                                if self.note_arr[x].note_off:
-                                    if out_type == NoteTypes.SQUARE1:
-                                        if self.gb1_chan < 32:
-                                            with self.note_arr[
-                                                    self.gb1_chan] as gbn:
-                                                gbn: Note
-                                                fmod.FSOUND_StopSound(
-                                                    gbn.fmod_channel)
-                                                self.log.debug(
-                                                    'GB1 chan %s stop sound err: %s',
-                                                    gbn.fmod_channel,
-                                                    get_err_str())
-                                                gbn.fmod_channel = 0
-                                                self.channels[
-                                                    gbn.parent].notes.remove(
-                                                        str(self.gb1_chan))
-                                                gbn.enable = False
-
-                                        self.gb1_chan = x
-                                    elif out_type == NoteTypes.SQUARE2:
-                                        if self.gb2_chan < 32:
-                                            with self.note_arr[
-                                                    self.gb2_chan] as gbn:
-                                                fmod.FSOUND_StopSound(
-                                                    gbn.fmod_channel)
-                                                self.log.debug(
-                                                    'GB2 chan %s stop sound err: %s',
-                                                    gbn.fmod_channel,
-                                                    get_err_str())
-                                                gbn.fmod_channel = 0
-                                                self.channels[
-                                                    gbn.parent].notes.remove(
-                                                        str(self.gb2_chan))
-                                                gbn.enable = False
-                                        self.gb2_chan = x
-                                    elif out_type == NoteTypes.WAVE:
-                                        if self.gb3_chan < 32:
-                                            with self.note_arr[
-                                                    self.gb3_chan] as gbn:
-                                                fmod.FSOUND_StopSound(
-                                                    gbn.fmod_channel)
-                                                self.log.debug(
-                                                    'GB3 chan %s stop sound err: %s',
-                                                    gbn.fmod_channel,
-                                                    get_err_str())
-                                                gbn.fmod_channel = 0
-                                                self.channels[
-                                                    gbn.parent].notes.remove(
-                                                        str(self.gb3_chan))
-                                                gbn.enable = False
-                                        self.gb3_chan = x
-                                    elif out_type == NoteTypes.NOISE:
-                                        if self.gb4_chan < 32:
-                                            with self.note_arr[
-                                                    self.gb4_chan] as gbn:
-                                                fmod.FSOUND_StopSound(
-                                                    gbn.fmod_channel)
-                                                self.log.debug(
-                                                    'GB4 chan %s stop sound err: %s',
-                                                    gbn.fmod_channel,
-                                                    get_err_str())
-                                                gbn.fmod_channel = 0
-                                                self.channels[
-                                                    gbn.parent].notes.remove(
-                                                        str(self.gb4_chan))
-                                                gbn.enable = False
-                                        self.gb4_chan = x
-
-                                freq = int(
-                                    round(daf * math.pow(
-                                        math.pow(2, 1 / 12),
-                                        (chan.pitch_bend - 0x40
-                                        ) / 0x40 * chan.pitch_range)))
-                                pan = int(chan.panning * 2)
-                                vol = int(dav * 0 if chan.mute else dav * 1)
-                                #print(self.note_arr[x].output, vol)
-                                self.note_arr[x].freq = daf
-                                self.note_arr[x].phase = NotePhases.INITIAL
-                                #fmod.FSOUND_SetSFXMasterVolume(0)
-                                self.note_arr[
-                                    x].fmod_channel = fmod.FSOUND_PlaySound(
-                                        x, self.smp_pool[das].fmod_smp)
-                                fmod.FSOUND_SetFrequency(
-                                    self.note_arr[x].fmod_channel, freq)
-                                fmod.FSOUND_SetVolume(
-                                    self.note_arr[x].fmod_channel, vol)
-                                fmod.FSOUND_SetPan(
-                                    self.note_arr[x].fmod_channel, pan)
-                                #fmod.FSOUND_SetSFXMasterVolume(self.gbl_vol)
-                                self.log.debug(
-                                    'Play sound das %s chan %s smp %s err: %s',
-                                    das, x, self.smp_pool[das].fmod_smp,
-                                    get_err_str())
-                                self.log.debug(
-                                    'Set frequency chan: %s freq: %s err: %s',
-                                    item.fmod_channel, freq, get_err_str())
-                                self.log.debug(
-                                    'Set volume: %s chan: %s err: %s', vol,
-                                    item.fmod_channel, get_err_str())
-                                self.log.debug(
-                                    'Set panning: %s chan: %s err: %s', pan,
-                                    item.fmod_channel, get_err_str())
+                self.play_notes()
             self.note_q.clear()
 
             if self.note_f_ctr > 0:
-                for i in range(31, -1, -1):
-                    if self.note_arr[i].enable is True:
-                        with self.note_arr[i] as item:
-                            if item.output == NoteTypes.DIRECT:
-                                if item.note_off and item.phase < NotePhases.RELEASE:
-                                    item.env_step = 0
-                                    item.phase = NotePhases.RELEASE
-                                if item.env_step == 0 or (
-                                        item.env_pos == item.env_dest
-                                ) or (item.env_step == 0 and
-                                      (item.env_pos <= item.env_dest)) or (
-                                          item.env_step >= 0 and
-                                          item.env_pos >= item.env_dest):
-                                    phase = item.phase
-                                    if phase == NotePhases.INITIAL:
-                                        item.phase = NotePhases.ATTACK
-                                        item.env_pos = 0
-                                        item.env_dest = 255
-                                        item.env_step = item.env_attn
-                                    elif phase == NotePhases.ATTACK:
-                                        item.phase = NotePhases.DECAY
-                                        item.env_dest = item.env_sus
-                                        item.env_step = (
-                                            item.env_dcy - 0x100) / 2
-                                    elif phase == NotePhases.DECAY:
-                                        item.phase = NotePhases.SUSTAIN
-                                        item.env_step = 0
-                                    elif phase == NotePhases.SUSTAIN:
-                                        item.phase = NotePhases.SUSTAIN
-                                        item.env_step = 0
-                                    elif phase == NotePhases.RELEASE:
-                                        item.phase = NotePhases.NOTEOFF
-                                        item.env_dest = 0
-                                        item.env_step = item.env_rel - 0x100
-                                    elif phase == NotePhases.NOTEOFF:
-
-                                        fmod.FSOUND_StopSound(
-                                            int(item.fmod_channel))
-                                        self.log.debug(
-                                            'Stop sound chan %r err: %s',
-                                            item.fmod_channel, get_err_str())
-                                        item.fmod_channel = 0
-                                        self.channels[item.parent].notes.remove(
-                                            str(i))
-                                        item.enable = False
-                                nex = item.env_pos + item.env_step
-                                if nex > item.env_dest and item.env_step > 0:
-                                    nex = item.env_dest
-                                if nex < item.env_dest and item.env_step < 0:
-                                    nex = item.env_dest
-                                item.env_pos = nex
-                                dav = (item.velocity / 0x7F) * (
-                                    self.channels[item.parent].main_vol / 0x7F
-                                ) * (item.env_pos / 0xFF) * 255
-                                if mutethis:
-                                    dav = 0
-                                vol = int(dav * 0 if self.channels[item.parent]
-                                          .mute else dav * 1)
-                                fmod.FSOUND_SetVolume(item.fmod_channel, vol)
-                                self.log.debug(
-                                    'Test set volume: %s chan: %s vol err: %s',
-                                    vol, item.fmod_channel, get_err_str())
-                            else:
-                                if item.note_off and item.phase < NotePhases.RELEASE:
-                                    item.env_step = 0
-                                    item.phase = NotePhases.RELEASE
-                                if item.env_step == 0 or (
-                                        item.env_pos == item.env_dest
-                                ) or (item.env_step == 0 and
-                                      (item.env_pos <= item.env_dest)) or (
-                                          item.env_step >= 0 and
-                                          item.env_pos >= item.env_dest):
-                                    phase: NotePhases = item.phase
-                                    #print(phase, item)
-                                    if phase == NotePhases.INITIAL:
-                                        item.phase = NotePhases.ATTACK
-                                        item.env_pos = 0
-                                        item.env_dest = 255
-                                        #item.env_step = item.env_attn * 2
-                                        item.env_step = 0x100 - (
-                                            item.env_attn * 8)
-                                    elif phase == NotePhases.ATTACK:
-                                        item.phase = NotePhases.DECAY
-                                        # item.env_dest = item.env_sus
-                                        item.env_dest = 255 / item.env_sus * 2
-                                        item.env_step = (-item.env_dcy) / 2
-                                        #item.env_step = (
-                                        #    item.env_dcy - 0x100) / 4
-                                    elif phase == NotePhases.DECAY:
-                                        item.phase = NotePhases.SUSTAIN
-                                        item.env_step = 0
-                                    elif phase == NotePhases.SUSTAIN:
-                                        item.phase = NotePhases.SUSTAIN
-                                        item.env_step = 0
-                                    elif phase == NotePhases.RELEASE:
-                                        item.phase = NotePhases.NOTEOFF
-                                        item.env_dest = 0
-                                        item.env_step = (0x8 - item.env_rel) * 2
-                                    elif phase == NotePhases.NOTEOFF:
-                                        out_type = item.output
-                                        if out_type == NoteTypes.SQUARE1:
-                                            self.gb1_chan = 255
-                                        elif out_type == NoteTypes.SQUARE2:
-                                            self.gb2_chan = 255
-                                        elif out_type == NoteTypes.WAVE:
-                                            self.gb3_chan = 255
-                                        elif out_type == NoteTypes.NOISE:
-                                            self.gb4_chan = 255
-                                        fmod.FSOUND_StopSound(
-                                            int(item.fmod_channel))
-                                        self.log.debug(
-                                            'Stop sound from NOTEOFF %s err: %s',
-                                            item.fmod_channel, get_err_str())
-                                        item.fmod_channel = 0
-                                        self.channels[item.parent].notes.remove(
-                                            str(i))
-                                        item.enable = False
-                                        #input()
-                                nex = item.env_pos + item.env_step
-                                # print(item.env_pos, item.env_step, nex,
-                                #       item.env_dest)
-                                if nex > item.env_dest and item.env_step > 0:
-                                    nex = item.env_dest
-                                if nex < item.env_dest and item.env_step < 0:
-                                    nex = item.env_dest
-                                item.env_pos = nex
-                                dav = (item.velocity / 0x7F) * (
-                                    self.channels[item.parent].main_vol / 0x7F
-                                ) * (item.env_pos / 0xFF) * 255
-                                #print(phase, item.env_pos, item.env_sus,
-                                #      item.env_dest, item.env_step, dav)
-                                if mutethis:
-                                    dav = 0
-                                vol = int(dav * 0 if self.channels[item.parent]
-                                          .mute else dav * 1)
-                                #print(item.output, vol)
-                                fmod.FSOUND_SetVolume(item.fmod_channel, vol)
-                                self.log.debug(
-                                    'Set volume: %s chan: %s err: %s', vol,
-                                    item.fmod_channel, get_err_str())
+                self.advance_notes()
             xmmm = False
             for i in range(self.channels.count):
                 if self.channels[i].enable:
@@ -1909,23 +1654,15 @@ class Decoder(object):
                 self.stop_song()
                 return None
             return 1
-        else:
 
-            self.last_tick = 0
-            self.tick_ctr = 0
-            self.incr += 1
-            if self.incr >= int(60000 / (self.tempo * self.SAPPY_PPQN)):
-                self.tick_ctr = 1
-                self.ttl_ticks += 1
-                if self.ttl_ticks % 48 == 0:
-                    self.beats += 1
-                self.incr = 0
+        self.tick_ctr = 0
+        self.incr += 1
+        if self.incr >= int(60000 / (self.tempo * self.SAPPY_PPQN)):
+            self.tick_ctr = 1
+            self.incr = 0
 
-            self.note_f_ctr = 1
+        self.note_f_ctr = 1
 
-        if self.tempo != self.last_tempo:
-            self.last_tempo = self.tempo
-            # TODO: EvtProcessor Stuff
         return 0
 
     def val(self, expr: str) -> Union[float, int]:
@@ -1946,7 +1683,7 @@ class Decoder(object):
             is_bin = False
             sep = 0
             for char in expr:
-                if char in string.digits:
+                if char in '0123456789':
                     out.append(char)
                 elif char in '-+':
                     if is_signed:
