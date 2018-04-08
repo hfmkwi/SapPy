@@ -7,7 +7,7 @@ from enum import IntEnum
 from typing import (Any, ItemsView, KeysView, MutableSequence, Union,
                     ValuesView)
 
-from fileio import File
+from fileio import VirtualFile
 
 __all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
            'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
@@ -171,7 +171,6 @@ class Collection(deque, UserDict):
 
     def __next__(self):
         try:
-            self._list = tuple(deque.__iter__(self))
             if self._list[self._ind] in self.data:
                 out = self.data[self._list[self._ind]]
             else:
@@ -278,8 +277,7 @@ class EventQueue(Collection):
     """LIFO container of internal events."""
 
     # yapf: disable
-    def add(self, ticks: int, cmd_byte: int, arg1: int, arg2: int, arg3: int
-           ) -> None:
+    def add(self, ticks: int, cmd_byte: int, arg1: int = 0, arg2: int = 0, arg3: int = 0) -> None:
         event = Event(
             ticks    = ticks,
             cmd_byte = cmd_byte,
@@ -401,6 +399,7 @@ class Channel(Type):
         self.transpose:    int             = 0
         self.vib_depth:    int             = 0
         self.vib_rate:     int             = 0
+        self.volume:       int             = 0
         self.key:          str             = ''
         self.output:       ChannelTypes    = ChannelTypes.DIRECT
         self.evt_queue:    EventQueue      = EventQueue()
@@ -506,6 +505,7 @@ class Note(Type):
         self.env_rel:      int        = 0
         self.env_sus:      int        = 0
         self.fmod_channel: int        = 0
+        self.fmod_fx:      int        = 0
         self.freq:         int        = 0
         self.note_num:     int        = note_num
         self.parent:       int        = parent
@@ -598,7 +598,7 @@ class Sample(Type):
 
     def rd_smp_data(self, id: int, t_size: int):
         """Read sample data as int from AGB rom."""
-        file = File.from_id(id)
+        file = VirtualFile.from_id(id)
         smp_data = bytearray()
         for i in range(t_size):  # pylint: disable=W0612
             smp_data.append(file.read_byte())
@@ -606,7 +606,7 @@ class Sample(Type):
 
     def sav_smp_data(self, id: int):
         """Save bytearray of sample data to AGB rom."""
-        file = File.from_id(id)
+        file = VirtualFile.from_id(id)
         for byte in self.smp_data_b:
             file.write_byte(byte)
 

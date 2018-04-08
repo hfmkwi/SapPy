@@ -5,7 +5,7 @@
 import struct
 from os.path import (exists, getsize, isabs, isfile)
 
-__all__ = ('Error', 'File', 'open_file', 'open_new_file')
+__all__ = ('Error', 'VirtualFile', 'open_file', 'open_new_file')
 
 
 class Error(Exception):
@@ -18,7 +18,7 @@ class Error(Exception):
         self.code = code
 
 
-class File(object):  # pylint: disable=R0902
+class VirtualFile(object):  # pylint: disable=R0902
     """Base file object """
 
     _ftable = {}
@@ -380,12 +380,12 @@ class File(object):  # pylint: disable=R0902
         return self.gba_ptr_to_addr(ptr)
 
 
-def open_file(file_path: str, file_id: int = None) -> File:
+def open_file(file_path: str, file_id: int = None) -> VirtualFile:
     """Open an existing file with read/write access in byte mode"""
-    return File(file_path, file_id)
+    return VirtualFile(file_path, file_id)
 
 
-def open_new_file(file_path: str, file_id: int = None) -> File:
+def open_new_file(file_path: str, file_id: int = None) -> VirtualFile:
     """Create a new file and open with read/write access in byte mode"""
     with open(file_path, 'wb+') as file:
         file.write(bytes(1))

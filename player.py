@@ -6,7 +6,7 @@ import math
 from struct import unpack, pack
 from typing import NamedTuple
 
-from fileio import File
+from fileio import VirtualFile
 
 __all__ = ('DirectHeader', 'DrumKitHeader', 'InstrumentHeader', 'InvalidHeader',
            'MasterTableEntry', 'MasterTableEntry', 'MultiHeader', 'NoiseHeader',
@@ -266,7 +266,7 @@ def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
 
 def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:
     """Read int from a specified file into a Direct header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = DirectHeader(
@@ -284,7 +284,7 @@ def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:
 
 def rd_drmkit_head(file_id: int, addr: int = None) -> DrumKitHeader:
     """Read int from a specified file into a DrumKit header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = DrumKitHeader(
@@ -302,7 +302,7 @@ def rd_drmkit_head(file_id: int, addr: int = None) -> DrumKitHeader:
 
 def rd_inst_head(file_id: int, addr: int = None) -> InstrumentHeader:
     """Read int from a specified file into a Instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = InstrumentHeader(
@@ -315,7 +315,7 @@ def rd_inst_head(file_id: int, addr: int = None) -> InstrumentHeader:
 
 def rd_inv_head(file_id: int, addr: int = None) -> InvalidHeader:
     """Read int from a specified file into a Invalid header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = InvalidHeader(
@@ -336,7 +336,7 @@ def rd_inv_head(file_id: int, addr: int = None) -> InvalidHeader:
 
 def rd_nse_head(file_id: int, addr: int = None) -> NoiseHeader:
     """Read int from a specified file into a Noise instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = NoiseHeader(
@@ -357,7 +357,7 @@ def rd_nse_head(file_id: int, addr: int = None) -> NoiseHeader:
 
 def rd_mul_head(file_id: int, addr: int = None) -> MultiHeader:
     """Read int from a specified file into a Multi-sample instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = MultiHeader(
@@ -372,7 +372,7 @@ def rd_mul_head(file_id: int, addr: int = None) -> MultiHeader:
 
 def rd_smp_head(file_id: int, addr: int = None) -> SampleHeader:
     """Read int from a specified file into a Sample header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = SampleHeader(
@@ -389,7 +389,7 @@ def rd_smp_head(file_id: int, addr: int = None) -> SampleHeader:
 
 def rd_sng_head(file_id: int, addr: int = None) -> SongHeader:
     """Read int from a specified file into a Song header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = SongHeader(
@@ -405,7 +405,7 @@ def rd_sng_head(file_id: int, addr: int = None) -> SongHeader:
 
 def rd_sq1_head(file_id: int, addr: int = None) -> SquareOneHeader:
     """Read int from a specified file into a Square1 instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = SquareOneHeader(
@@ -426,7 +426,7 @@ def rd_sq1_head(file_id: int, addr: int = None) -> SquareOneHeader:
 
 def rd_sq2_head(file_id: int, addr: int = None) -> SquareTwoHeader:
     """Read bytes from a specified file into a Square2 instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = SquareTwoHeader(
@@ -447,7 +447,7 @@ def rd_sq2_head(file_id: int, addr: int = None) -> SquareTwoHeader:
 
 def rd_wav_head(file_id: int, addr: int = None) -> WaveHeader:
     """Read bytes from a specified file into a Wave instrument header."""
-    w_file = File.from_id(file_id)
+    w_file = VirtualFile.from_id(file_id)
     w_file.rd_addr = addr
     # yapf: disable
     header = WaveHeader(
