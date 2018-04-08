@@ -378,6 +378,7 @@ class Channel(Type):
 
     # yapf: disable
     def __init__(self):
+        self.playing:      list            = []
         self.in_sub:       bool            = False
         self.enable:       bool            = True
         self.mute:         bool            = False
@@ -520,6 +521,7 @@ class Note(Type):
 
     def reset(self):
         self.note_off = True
+        self.wait_ticks = 0
         self.vib_pos = 0.0
 
 

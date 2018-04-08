@@ -137,7 +137,12 @@ class Decoder(object):
             On success, a number between 0 and 32. -1 otherwise.
         """
         for i in range(31, -1, -1):
-            if self.note_arr[i].enable is False:
+            item = self.note_arr[i]
+            if item.enable is False:
+                name = note_to_name(item.note_num)
+                if name in self.channels[item.parent].playing:
+                    self.channels[item.parent].playing.remove(
+                        note_to_name(item.note_num))
                 return i
         return 255
 
@@ -157,7 +162,7 @@ class Decoder(object):
             w_smp.loop_start = smp_head.loop
             w_smp.loop = smp_head.flags > 0
             w_smp.gb_wave = False
-            if use_readstr:
+            if not use_readstr:
                 w_smp.smp_data = self.file.rd_str(smp_head.size)
             else:
                 w_smp.smp_data = self.file.rd_addr
@@ -212,7 +217,7 @@ class Decoder(object):
                 return True
         return False
 
-    def resetPlayer(self) -> None:
+    def reset_player(self) -> None:
         self.channels.clear()
         self.drmkits.clear()
         self.smp_pool.clear()
@@ -1040,7 +1045,7 @@ class Decoder(object):
         uses into an event queue for playback processing. Is repeatable.
         """
 
-        self.resetPlayer()
+        self.reset_player()
 
         self.file = open_file(fpath, 1)
         header_ptr = self.file.rd_gba_ptr(sng_list_ptr + sng_num * 8)
@@ -1097,6 +1102,8 @@ class Decoder(object):
             if item.wait_ticks <= 0 and item.enable is True and item.note_off is False:
                 if self.channels[item.parent].sustain is False:
                     item.reset()
+                    if item.note_num in self.channels[item.parent].playing:
+                        self.channels[item.parent].playing.remove(item.note_num)
 
     def update_channels(self) -> None:
         in_for = True
@@ -1104,12 +1111,8 @@ class Decoder(object):
             if chan.enable is False:
                 self.log.debug(f'| CHAN: {plat:>4} | SKIP EXEC  |')
                 continue
-            #self.log.debug(f'| CHAN: {plat:>4} | BEGIN EXEC |')
             if chan.wait_ticks > 0:
                 chan.wait_ticks -= 1
-                # self.log.debug(
-                #     f'| CHAN: {plat:>4} | CMD: NONE  | DELTA WAIT | TIME: {chan.wait_ticks:<5}'
-                # )
             while chan.wait_ticks <= 0:
                 evt_queue: Event = chan.evt_queue[chan.pgm_ctr]
                 cmd_byte = evt_queue.cmd_byte
@@ -1222,6 +1225,8 @@ class Decoder(object):
                         if not note.enable or note.note_off or note.wait_ticks > -1:
                             continue
                         note.reset()
+                        if note.note_num in chan.playing:
+                            chan.playing.remove(note.note_num)
                         self.log.debug(
                             f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#6x} | CTRL: {cmd_byte:<#4x} | NOTE OFF   | NOTE: {nid.note_id:>4}'
                         )
@@ -1322,14 +1327,16 @@ class Decoder(object):
                             if note.wait_ticks == -1:
                                 if not chan.sustain:
                                     note.reset()
-                                continue
-                            note.reset()
-
+                            else:
+                                if chan.sustain:
+                                    note.reset()
                             self.log.debug(
                                 f'| CHAN: {item.parent:>4} | NOTE: {nid.note_id:4} | NOTE OFF   |'
                             )
 
                 chan.notes.add(x, str(x))
+                if self.note_arr[x].note_num not in chan.playing:
+                    chan.playing.append(self.note_arr[x].note_num)
                 pat = item.patch_num
                 nn = item.note_num
                 std_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
@@ -1493,6 +1500,7 @@ class Decoder(object):
 
                 self.note_arr[x].fmod_channel = playSound(
                     x, self.smp_pool[das].fmod_smp, None, True)
+
                 self.note_arr[x].fmod_fx = enableFX(
                     self.note_arr[x].fmod_channel, 3)
                 setEcho(self.note_arr[x].fmod_fx, 0, 0, 333, 333, False)
@@ -1513,6 +1521,7 @@ class Decoder(object):
                 self.log.debug(
                     f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET PAN    | PAN: {pan:>5}'
                 )
+        self.note_q.clear()
 
     def advance_notes(self) -> None:
         for i in range(31, -1, -1):
@@ -1547,7 +1556,7 @@ class Decoder(object):
                         item.phase = NotePhases.NOTEOFF
                         item.env_dest = 0
                         item.env_step = item.env_rel - 0x100
-                    elif phase == NotePhases.NOTEOFF and item.env_pos <= item.env_dest:
+                    elif phase == NotePhases.NOTEOFF:
                         stopSound(item.fmod_channel)
                         disableFX(item.fmod_channel)
                         self.log.debug(
@@ -1640,12 +1649,10 @@ class Decoder(object):
             self.update_notes()
             self.update_channels()
 
-            if self.channels.count > 0:
-                self.play_notes()
-            self.note_q.clear()
-
+            self.play_notes()
             self.advance_notes()
-            out = self.get_volumes()
+            out = self.update_interface()
+
             print(out, end='\r', flush=True)
             for channel in self.channels:
                 if channel.enable:
@@ -1668,14 +1675,17 @@ class Decoder(object):
         bottom = '+' + '+'.join(['-' * 32] * self.channels.count)
         return top + '\n' + bottom
 
-    def get_volumes(self) -> str:
-        # c_vols = []
-        # for channel in self.channels:
-        #     volume = channel.volume // (128 // 32 * 2)
-        #     c_vols.append('=' * volume)
+    def update_interface(self) -> str:
         template = '|{:32}' * self.channels.count
-        header = template.format(
-            *[c.volume // (128 // 32 * 2) * '=' for c in self.channels])
+        bars = [c.volume // (128 // 32 * 2) * '=' for c in self.channels]
+        out = []
+        for i, c in enumerate(self.channels):
+            info = ('{:>3}' * (len(c.playing) + 1)).format(
+                *list(map(note_to_name, c.playing)) + [c.wait_ticks])
+            out.append(bars[i][:32 - len(bars[i])] + ' ' *
+                       (32 - len(info) - len(bars[i])) + info)
+
+        header = template.format(*out)
         return header
 
     def play_song(self, fpath: str, song_num: int, song_table: int) -> None:
