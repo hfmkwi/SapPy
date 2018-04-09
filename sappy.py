@@ -10,15 +10,12 @@ from random import random
 from time import time, sleep
 from logging import INFO, basicConfig, getLogger
 from typing import List, NamedTuple, Union
+from sys import stdout
 
 from containers import *
 from fileio import *
 from fmod import *
 from player import *
-
-from struct import unpack, pack
-
-from ctypes import byref, pointer
 
 BASE = math.pow(2, 1 / 12)
 gba_ptr_to_addr = VirtualFile.gba_ptr_to_addr
@@ -139,10 +136,10 @@ class Decoder(object):
         for i in range(31, -1, -1):
             item = self.note_arr[i]
             if item.enable is False:
-                name = note_to_name(item.note_num)
-                if name in self.channels[item.parent].playing:
-                    self.channels[item.parent].playing.remove(
-                        note_to_name(item.note_num))
+                # name = note_to_name(item.note_num)
+                # if name in self.channels[item.parent].playing:
+                #     self.channels[item.parent].playing.remove(
+                #         note_to_name(item.note_num))
                 return i
         return 255
 
@@ -162,7 +159,7 @@ class Decoder(object):
             w_smp.loop_start = smp_head.loop
             w_smp.loop = smp_head.flags > 0
             w_smp.gb_wave = False
-            if not use_readstr:
+            if use_readstr:
                 w_smp.smp_data = self.file.rd_str(smp_head.size)
             else:
                 w_smp.smp_data = self.file.rd_addr
@@ -495,7 +492,7 @@ class Decoder(object):
                                     cdr)].output in out:
                                 self.get_smp(self.insts[str(
                                     last_patch)].directs[str(cdr)], direct_head,
-                                             samp_head, False)
+                                             samp_head, True)
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                 )
@@ -517,7 +514,7 @@ class Decoder(object):
                             )
                             if self.directs[str(last_patch)].output in out:
                                 self.get_smp(self.directs[str(last_patch)],
-                                             direct_head, samp_head, True)
+                                             direct_head, samp_head, False)
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | GET SAMPLE | {self.directs[str(last_patch)]}'
                                 )
@@ -1053,7 +1050,6 @@ class Decoder(object):
         unk = self.file.rd_byte()
         priority = self.file.rd_byte()
         echo = self.file.rd_byte()
-        #print(echo)
         inst_table_ptr = self.file.rd_gba_ptr()
 
         self.channels = ChannelQueue([Channel() for i in range(num_tracks)])
@@ -1151,7 +1147,7 @@ class Decoder(object):
                     if self.dct_exists(self.directs, chan.patch_num):
                         chan.output = self.directs[str(chan.patch_num)].output
                     elif self.inst_exists(chan.patch_num):
-                        chan.output = ChannelTypes.MUL_SMP
+                        chan.output = ChannelTypes.MULTI
                     elif self.drm_exists(chan.patch_num):
                         chan.output = ChannelTypes.DRUMKIT
                     else:
@@ -1222,7 +1218,7 @@ class Decoder(object):
                     chan.sustain = False
                     for nid in chan.notes:
                         note: Note = self.note_arr[nid.note_id]
-                        if not note.enable or note.note_off or note.wait_ticks > -1:
+                        if not note.enable or note.note_off:
                             continue
                         note.reset()
                         if note.note_num in chan.playing:
@@ -1235,9 +1231,9 @@ class Decoder(object):
                     )
                     chan.pgm_ctr += 1
                 elif cmd_byte == 0xB3:
+                    chan.pgm_ctr = chan.subs[chan.sub_ctr].evt_q_ptr
                     chan.sub_ctr += 1
                     chan.rtn_ptr += 1
-                    chan.pgm_ctr = chan.subs[chan.sub_ctr].evt_q_ptr
                     self.log.debug(
                         f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CALL SUB   | RTN: {chan.rtn_ptr:<#5x}'
                     )
@@ -1251,10 +1247,21 @@ class Decoder(object):
                         )
                     else:
                         chan.pgm_ctr += 1
+                    for nid in chan.notes:
+                        note: Note = self.note_arr[nid.note_id]
+                        note.reset()
+                        if note.note_num in chan.playing:
+                            chan.playing.remove(note.note_num)
                 elif cmd_byte == 0xB2:
                     self.looped = True
                     chan.in_sub = False
                     chan.pgm_ctr = chan.loop_ptr
+                    chan.sustain = False
+                    for nid in chan.notes:
+                        note: Note = self.note_arr[nid.note_id]
+                        note.reset()
+                        if note.note_num in chan.playing:
+                            chan.playing.remove(note.note_num)
                     self.log.debug(
                         f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | JUMP ADDR  | PTR: {chan.loop_ptr:<#5x}'
                     )
@@ -1274,12 +1281,12 @@ class Decoder(object):
                         self.looped = False
                         chan.wait_ticks = 0
                         continue
-                    chan.pgm_ctr += 1
-                    n_evt_queue = chan.evt_queue[chan.pgm_ctr]
+                    n_evt_queue = chan.evt_queue[chan.pgm_ctr + 1]
                     if chan.pgm_ctr > 0:
                         chan.wait_ticks = n_evt_queue.ticks - evt_queue.ticks
                     else:
                         chan.wait_ticks = n_evt_queue.ticks
+                    chan.pgm_ctr += 1
                 else:
                     #print(hex(cmd_byte))
                     self.log.debug(
@@ -1327,9 +1334,13 @@ class Decoder(object):
                             if note.wait_ticks == -1:
                                 if not chan.sustain:
                                     note.reset()
-                            else:
+                            elif note.wait_ticks == 0:
                                 if chan.sustain:
                                     note.reset()
+                            else:
+                                note.reset()
+                            if note.note_num in chan.playing:
+                                chan.playing.remove(note.note_num)
                             self.log.debug(
                                 f'| CHAN: {item.parent:>4} | NOTE: {nid.note_id:4} | NOTE OFF   |'
                             )
@@ -1448,7 +1459,6 @@ class Decoder(object):
                             self.channels[gbn.parent].notes.remove(
                                 str(self.gb1_chan))
                             gbn.enable = False
-
                     self.gb1_chan = x
                 elif out_type == NoteTypes.SQUARE2:
                     if self.gb2_chan < 32:
@@ -1524,8 +1534,8 @@ class Decoder(object):
         self.note_q.clear()
 
     def advance_notes(self) -> None:
-        for i in range(31, -1, -1):
-            item = self.note_arr[i]
+        for i, item in enumerate(self.note_arr):
+            #item = self.note_arr[i]
             if item.enable is False:
                 continue
             if item.output == NoteTypes.DIRECT:
@@ -1608,7 +1618,7 @@ class Decoder(object):
                         item.phase = NotePhases.NOTEOFF
                         item.env_dest = 0
                         item.env_step = (0x8 - item.env_rel) * 2
-                    elif phase == NotePhases.NOTEOFF and item.wait_ticks == 0:
+                    elif phase == NotePhases.NOTEOFF:
                         out_type = item.output
                         if out_type == NoteTypes.SQUARE1:
                             self.gb1_chan = 255
@@ -1646,14 +1656,15 @@ class Decoder(object):
         self.update_vibrato()
 
         if self.tick_ctr:
+            template = '|{:33}' * self.channels.count
+            out = self.update_interface()
+            stdout.write(template.format(*out) + '\r')
+            stdout.flush()
             self.update_notes()
             self.update_channels()
 
             self.play_notes()
             self.advance_notes()
-            out = self.update_interface()
-
-            print(out, end='\r', flush=True)
             for channel in self.channels:
                 if channel.enable:
                     return 1
@@ -1670,35 +1681,56 @@ class Decoder(object):
         return 0
 
     def get_player_header(self) -> str:
-        top = ('| CHANNEL {:<23}' *
-               self.channels.count).format(*range(self.channels.count))
-        bottom = '+' + '+'.join(['-' * 32] * self.channels.count)
+        self.update_channels()
+        top = []
+        for i, c in enumerate(self.channels):
+            top.append(f'| CHANNEL {i:<2} {c.output.name:>20} ')
+        top = ''.join(top)
+        bottom = '+' + '+'.join(['-' * 33] * self.channels.count)
         return top + '\n' + bottom
 
     def update_interface(self) -> str:
-        template = '|{:32}' * self.channels.count
-        bars = [c.volume // (128 // 32 * 2) * '=' for c in self.channels]
-        out = []
-        for i, c in enumerate(self.channels):
-            info = ('{:>3}' * (len(c.playing) + 1)).format(
-                *list(map(note_to_name, c.playing)) + [c.wait_ticks])
-            out.append(bars[i][:32 - len(bars[i])] + ' ' *
-                       (32 - len(info) - len(bars[i])) + info)
 
-        header = template.format(*out)
-        return header
+        out = []
+        for c in self.channels:
+            c: Channel
+            vol = c.volume // 16
+            bar = vol * "="
+            notes = []
+            for n in map(note_to_name, c.playing):
+                notes.append(f'{n:>3}')
+            notes.append(f'{c.wait_ticks:<3}')
+            notes = ' '.join(notes)
+            double_bar = list(f'{bar + "|" + bar:^33}')
+            insert_pt = len(double_bar) - len(notes)
+            double_bar[insert_pt:] = notes
+            double_bar[round(c.panning / 4)] = ':'
+            bar = ''.join(double_bar)
+            out.append(f'{bar:^33}')
+
+        return out
 
     def play_song(self, fpath: str, song_num: int, song_table: int) -> None:
         self.load_song(fpath, song_num, song_table)
         header = self.get_player_header()
-        e = self.evt_processor_timer
         print(header)
+        self.process()
+
+    def process(self):
+        e = self.evt_processor_timer
+
+        s = sleep
+        r = round
+        t = time
         while True:
-            st = time()
+            st = t()
             if e() is None:
                 break
-            t = round(60000.0 / (self.tempo * 24.0) / 1000.0, 3)
-            sleep(math.fabs(round(t - (time() - st), 3)))
+            tm = 60000.0 / (self.tempo * 24.0) / 1000.0
+            if (t() - st) > tm:
+                s(0)
+                continue
+            s(r(tm - (t() - st), 3))
 
     def val(self, expr: str) -> Union[float, int]:
         if expr is None:

@@ -28,7 +28,7 @@ class ChannelTypes(IntEnum):
     UNK5    = 5
     UNK6    = 6
     UNK7    = 7
-    MUL_SMP = 8
+    MULTI   = 8
     DRUMKIT = 9
     NULL    = 255
     # yapf: enable

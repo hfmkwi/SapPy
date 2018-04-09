@@ -240,7 +240,7 @@ class WaveHeader(NamedTuple):
 def note_to_name(midi_note: int) -> str:
     """Retrieve the string name of a MIDI note from its byte representation."""
     x = midi_note % 12
-    o = midi_note // 12 - 2
+    o = midi_note // 12
     return NOTES.get(x) + str(o)
 
 
