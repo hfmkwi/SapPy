@@ -1,24 +1,23 @@
 #!python
 #-*- coding: utf-8 -*-
-# pylint disable=C0103, C0326, E1120, R0902, R0903, R0904, R0912, R0913, R0914, R0915, R1702
-# pylint: disable=W0614
 # TODO: Either use the original FMOD dlls or find a sound engine.
 """Main file."""
+import logging
 import math
-from os import remove
-from random import random
-from time import time, sleep
-from logging import INFO, basicConfig, getLogger
-from typing import List, NamedTuple, Union
-from sys import stdout
+import os
+import random
+import sys
+import time
+import typing
+import multiprocessing
 
-from containers import *
-from fileio import *
-from fmod import *
-from player import *
+import sappy.core as core
+import sappy.fileio as fileio
+import sappy.fmod as fmod
+import sappy.player as player
 
 BASE = math.pow(2, 1 / 12)
-gba_ptr_to_addr = VirtualFile.gba_ptr_to_addr
+gba_ptr_to_addr = fileio.VirtualFile.gba_ptr_to_addr
 
 
 class Decoder(object):
@@ -29,51 +28,49 @@ class Decoder(object):
     GB_WAV_BASE_FREQ = 880
     GB_NSE_MULTI = 0.5
     SAPPY_PPQN = 24
-    WIDTH = 32
+    WIDTH = 33
 
     if DEBUG:
-        basicConfig(level=DEBUG)
-    else:
-        basicConfig(level=None)
-    log = getLogger(name=__name__)
+        logging.basicConfig(level=DEBUG)
+    log = logging.getLogger(name=__name__)
+
+    if WIDTH < 17:
+        WIDTH = 17
 
     def __init__(self):
         # yapf: disable
-        self.looped:     bool                        = False
-        self.playing:    bool                        = False
-        self.gb1_chan:   int                         = 0
-        self.gb2_chan:   int                         = 0
-        self.gb3_chan:   int                         = 0
-        self.gb4_chan:   int                         = 0
-        self.incr:       int                         = 0
-        self.tempo:      int                         = 0
-        self.transpose:  int                         = 0
-        self._gbl_vol:   int                         = 256
-        self.tick_ctr:   bool                        = False
-        self.mdrum_map:  list                        = []
-        self.mpatch_map: list                        = []
-        self.mpatch_tbl: list                        = []
-        self.fpath:      str                         = ''
-        self.rip_ears:   Collection                  = Collection()
-        self.channels:   ChannelQueue[Channel]       = ChannelQueue()  # pylint:    disable = E1136
-        self.directs:    DirectQueue[Direct]         = DirectQueue()  # pylint:     disable = E1136
-        self.drmkits:    DrumKitQueue[DrumKit]       = DrumKitQueue()  # pylint:    disable = E1136
-        self.insts:      InstrumentQueue[Instrument] = InstrumentQueue()  # pylint: disable = E1136
-        self.note_arr:   List                        = Collection([Note(*[0]*6)] * 32)
-        self.nse_wavs:   List[List[str]]             = [[[] for i in range(10)] for i in range(2)]
-        self.note_q:     NoteQueue[Note]             = NoteQueue()  # pylint:       disable = E1136
-        self.smp_pool:   SampleQueue[Sample]         = SampleQueue()  # pylint:     disable = E1136
-        self.file:       VirtualFile                 = None
+        self.looped:    bool                                  = False
+        self.playing:   bool                                  = False
+        self.tick_ctr:  bool                                  = False
+        self.gb1_chan:  int                                   = 0
+        self.gb2_chan:  int                                   = 0
+        self.gb3_chan:  int                                   = 0
+        self.gb4_chan:  int                                   = 0
+        self.incr:      int                                   = 0
+        self.tempo:     int                                   = 0
+        self.transpose: int                                   = 0
+        self._gbl_vol:  int                                   = 256
+        self.fpath:     str                                   = ''
+        self.rip_ears:  core.Collection                       = core.Collection()
+        self.channels:  core.ChannelQueue[core.Channel]       = core.ChannelQueue()
+        self.directs:   core.DirectQueue[core.Direct]         = core.DirectQueue()
+        self.drmkits:   core.DrumKitQueue[core.DrumKit]       = core.DrumKitQueue()
+        self.insts:     core.InstrumentQueue[core.Instrument] = core.InstrumentQueue()
+        self.note_arr:  typing.List                           = core.Collection([core.Note(*[0]*6)] * 32)
+        self.nse_wavs:  typing.List[typing.List[str]]         = [[[] for i in range(10)] for i in range(2)]
+        self.note_q:    core.NoteQueue[core.Note]             = core.NoteQueue()
+        self.smp_pool:  core.SampleQueue[core.Sample]         = core.SampleQueue()
+        self.file:      fileio.VirtualFile                    = None
         # yapf: enable
         sz = 2048
         if not sz:
             sz = 2048
         for i in range(10):
             for _ in range(sz):
-                self.nse_wavs[0][i].append(chr(int(random() * 153)))
+                self.nse_wavs[0][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[0][i] = "".join(self.nse_wavs[0][i])
             for _ in range(256):
-                self.nse_wavs[1][i].append(chr(int(random() * 153)))
+                self.nse_wavs[1][i].append(chr(int(random.random() * 153)))
             self.nse_wavs[1][i] = "".join(self.nse_wavs[1][i])
         #self.gbl_vol = 255
 
@@ -84,22 +81,23 @@ class Decoder(object):
 
     @gbl_vol.setter
     def gbl_vol(self, vol: int) -> None:
-        setMasterVolume(vol)
+        fmod.setMasterVolume(vol)
         self._gbl_vol = vol
 
-    def dct_exists(self, dcts: DirectQueue, dct_id: int) -> bool:
-        """Check if a direct exists in a specfied `DirectQueue`."""
+    def dct_exists(self, dcts: core.DirectQueue, dct_id: int) -> bool:
+        """Check if a direct exists in a specfied `core.DirectQueue`."""
         for dct in dcts:
-            dct: Direct
+            dct: core.Direct
             if dct.key == str(dct_id):
                 return True
         return False
 
-    def set_direct(self, direct: Direct, inst_head: InstrumentHeader,
-                   dct_head: DirectHeader, gb_head: NoiseHeader) -> None:
+    def set_direct(
+            self, direct: core.Direct, inst_head: player.InstrumentHeader,
+            dct_head: player.DirectHeader, gb_head: player.NoiseHeader) -> None:
         # yapf: disable
         direct.drum_key  = inst_head.drum_pitch
-        direct.output    = DirectTypes(inst_head.channel & 7)
+        direct.output    = core.DirectTypes(inst_head.channel & 7)
         direct.env_attn  = dct_head.attack
         direct.env_dcy   = dct_head.hold
         direct.env_sus   = dct_head.sustain
@@ -136,15 +134,11 @@ class Decoder(object):
         for i in range(31, -1, -1):
             item = self.note_arr[i]
             if item.enable is False:
-                # name = note_to_name(item.note_num)
-                # if name in self.channels[item.parent].playing:
-                #     self.channels[item.parent].playing.remove(
-                #         note_to_name(item.note_num))
                 return i
         return 255
 
-    def get_smp(self, smp: Sample, dct_head: DirectHeader,
-                smp_head: SampleHeader, use_readstr: bool) -> None:
+    def get_smp(self, smp: core.Sample, dct_head: player.DirectHeader,
+                smp_head: player.SampleHeader, use_readstr: bool) -> None:
         """Load a sample from ROM into memory."""
         smp.smp_id = dct_head.smp_head
         sid = smp.smp_id
@@ -152,8 +146,8 @@ class Decoder(object):
             return
         self.smp_pool.add(str(sid))
         w_smp = self.smp_pool[str(sid)]
-        smp_head = rd_smp_head(1, VirtualFile.gba_ptr_to_addr(sid))
-        if smp.output == DirectTypes.DIRECT:
+        smp_head = player.rd_smp_head(1, gba_ptr_to_addr(sid))
+        if smp.output == core.DirectTypes.DIRECT:
             w_smp.size = smp_head.size
             w_smp.freq = smp_head.freq * 64
             w_smp.loop_start = smp_head.loop
@@ -169,7 +163,7 @@ class Decoder(object):
             w_smp.loop_start = 0
             w_smp.loop = True
             w_smp.gb_wave = True
-            tsi = self.file.rd_str(16, VirtualFile.gba_ptr_to_addr(sid))
+            tsi = self.file.rd_str(16, gba_ptr_to_addr(sid))
             temp_str = []
             for ai in range(32):
                 bi = ai % 2
@@ -194,7 +188,7 @@ class Decoder(object):
                 return True
         return False
 
-    def kmap_exists(self, kmaps: KeyMapQueue, kmap_id: int) -> bool:
+    def kmap_exists(self, kmaps: core.KeyMapQueue, kmap_id: int) -> bool:
         """Check if a keymap is defined."""
         for kmap in kmaps:
             if kmap.key == str(kmap_id):
@@ -274,17 +268,17 @@ class Decoder(object):
 
         return loop_offset
 
-    def load_events(self, channel: Channel, header_ptr: int, table_ptr: int,
-                    track_num: int) -> None:
+    def load_events(self, channel: core.Channel, header_ptr: int,
+                    table_ptr: int, track_num: int) -> None:
         pgm_ctr = self.file.rd_gba_ptr(header_ptr + 4 + (track_num + 1) * 4)
         loop_addr = self.get_loop_offset(pgm_ctr)
 
-        inst_head = InstrumentHeader()
-        drum_head = DrumKitHeader()
-        direct_head = DirectHeader()
-        samp_head = SampleHeader()
-        multi_head = MultiHeader()
-        noise_head = NoiseHeader()
+        inst_head = player.InstrumentHeader()
+        drum_head = player.DrumKitHeader()
+        direct_head = player.DirectHeader()
+        samp_head = player.SampleHeader()
+        multi_head = player.MultiHeader()
+        noise_head = player.NoiseHeader()
 
         cticks = 0
         last_cmd = 0xBE
@@ -297,7 +291,7 @@ class Decoder(object):
         channel.loop_ptr = -1
         evt_queue = channel.evt_queue
 
-        out = (DirectTypes.DIRECT, DirectTypes.WAVE)
+        out = (core.DirectTypes.DIRECT, core.DirectTypes.WAVE)
 
         while True:
             self.file.rd_addr = pgm_ctr
@@ -308,7 +302,7 @@ class Decoder(object):
             if (cmd != 0xB9 and 0xB5 <= cmd < 0xC5) or cmd == 0xCD:
                 arg1 = self.file.rd_byte()
                 if cmd == 0xBC:
-                    transpose = sbyte_to_int(arg1)
+                    transpose = player.sbyte_to_int(arg1)
                     self.log.debug(
                         f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | SET TRPS | {transpose:<#x}'
                     )
@@ -401,17 +395,18 @@ class Decoder(object):
                             f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
                         )
                     if self.patch_exists(last_patch) is False:
-                        inst_head = rd_inst_head(1, table_ptr + last_patch * 12)
+                        inst_head = player.rd_inst_head(
+                            1, table_ptr + last_patch * 12)
                         self.log.debug(
                             f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                         )
 
                         if inst_head.channel & 0x80 == 0x80:  # Drumkit
-                            dct_table = rd_drmkit_head(1).dct_tbl
+                            dct_table = player.rd_drmkit_head(1).dct_tbl
                             patch_addr = gba_ptr_to_addr(dct_table + patch * 12)
-                            inst_head = rd_inst_head(1, patch_addr)
-                            direct_head = rd_dct_head(1)
-                            noise_head = rd_nse_head(1, patch_addr + 2)
+                            inst_head = player.rd_inst_head(1, patch_addr)
+                            direct_head = player.rd_dct_head(1)
+                            noise_head = player.rd_nse_head(1, patch_addr + 2)
                             self.drmkits.add(str(last_patch))
                             directs = self.drmkits[str(last_patch)].directs
                             directs.add(str(patch))
@@ -443,23 +438,21 @@ class Decoder(object):
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {directs[str(patch)]}'
                                 )
                         elif inst_head.channel & 0x40 == 0x40:  # Multi
-                            multi_head = rd_mul_head(1)
+                            multi_head = player.rd_mul_head(1)
                             self.insts.add(str(last_patch))
                             kmaps = self.insts[str(last_patch)].kmaps
                             kmaps.add(0, str(patch))
                             kmaps[str(patch)].assign_dct = self.file.rd_byte(
-                                VirtualFile.gba_ptr_to_addr(multi_head.kmap) +
-                                patch)
+                                gba_ptr_to_addr(multi_head.kmap) + patch)
                             cdr = kmaps[str(patch)].assign_dct
-                            inst_head = rd_inst_head(
+                            inst_head = player.rd_inst_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    multi_head.dct_tbl + cdr * 12))
-                            direct_head = rd_dct_head(1)
-                            noise_head = rd_nse_head(
+                                gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12))
+                            direct_head = player.rd_dct_head(1)
+                            noise_head = player.rd_nse_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    multi_head.dct_tbl + cdr * 12) + 2)
+                                gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12) +
+                                2)
                             self.insts[str(last_patch)].directs.add(str(cdr))
                             self.set_direct(
                                 self.insts[str(last_patch)].directs[str(cdr)],
@@ -496,9 +489,9 @@ class Decoder(object):
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                 )
-                        else:  # Direct/GB Sample
-                            direct_head = rd_dct_head(1)
-                            noise_head = rd_nse_head(
+                        else:  # core.Direct/GB core.Sample
+                            direct_head = player.rd_dct_head(1)
+                            noise_head = player.rd_nse_head(
                                 1, table_ptr + last_patch * 12 + 2)
                             self.directs.add(str(last_patch))
                             self.set_direct(self.directs[str(last_patch)],
@@ -519,21 +512,21 @@ class Decoder(object):
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | GET SAMPLE | {self.directs[str(last_patch)]}'
                                 )
                     else:  # Patch exists
-                        inst_head = rd_inst_head(1, table_ptr + last_patch * 12)
+                        inst_head = player.rd_inst_head(
+                            1, table_ptr + last_patch * 12)
                         self.log.debug(
                             f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PC.EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                         )
                         if inst_head.channel & 0x80 == 0x80:
-                            drum_head = rd_drmkit_head(1)
-                            inst_head = rd_inst_head(
+                            drum_head = player.rd_drmkit_head(1)
+                            inst_head = player.rd_inst_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    drum_head.dct_tbl + patch * 12))
-                            direct_head = rd_dct_head(1)
-                            noise_head = rd_nse_head(
+                                gba_ptr_to_addr(drum_head.dct_tbl + patch * 12))
+                            direct_head = player.rd_dct_head(1)
+                            noise_head = player.rd_nse_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    drum_head.dct_tbl + patch * 12) + 2)
+                                gba_ptr_to_addr(drum_head.dct_tbl + patch * 12)
+                                + 2)
                             self.log.debug(
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
                             )
@@ -567,7 +560,7 @@ class Decoder(object):
                                         f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drmkits[str(last_patch)].directs[str(patch)]}'
                                     )
                         elif inst_head.channel & 0x40 == 0x40:
-                            multi_head = rd_mul_head(1)
+                            multi_head = player.rd_mul_head(1)
                             self.log.debug(
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
                             )
@@ -581,15 +574,14 @@ class Decoder(object):
                                     str(patch))
                             cdr = self.insts[str(last_patch)].kmaps[str(
                                 patch)].assign_dct
-                            inst_head = rd_inst_head(
+                            inst_head = player.rd_inst_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    multi_head.dct_tbl + cdr * 12))
-                            direct_head = rd_dct_head(1)
-                            noise_head = rd_nse_head(
+                                gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12))
+                            direct_head = player.rd_dct_head(1)
+                            noise_head = player.rd_nse_head(
                                 1,
-                                VirtualFile.gba_ptr_to_addr(
-                                    multi_head.dct_tbl + cdr * 12) + 2)
+                                gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12) +
+                                2)
                             self.log.debug(
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
                             )
@@ -674,21 +666,21 @@ class Decoder(object):
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PRV NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
                             )
                         if self.patch_exists(last_patch) is False:
-                            inst_head = rd_inst_head(
+                            inst_head = player.rd_inst_head(
                                 1, table_ptr + last_patch * 12)
                             self.log.debug(
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PV PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | CHAN: {inst_head.channel:<#4x}'
                             )
                             if inst_head.channel & 0x80 == 0x80:
-                                drum_head = rd_drmkit_head(1)
-                                inst_head = rd_inst_head(
+                                drum_head = player.rd_drmkit_head(1)
+                                inst_head = player.rd_inst_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         drum_head.dct_tbl + patch * 12))
-                                direct_head = rd_dct_head(1)
-                                noise_head = rd_nse_head(
+                                direct_head = player.rd_dct_head(1)
+                                noise_head = player.rd_nse_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         drum_head.dct_tbl + patch * 12) + 2)
                                 self.drmkits.add(str(last_patch))
                                 self.drmkits[str(last_patch)].directs.add(
@@ -723,23 +715,22 @@ class Decoder(object):
                                         f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.drmkits[str(last_patch)].directs[str(patch)]}'
                                     )
                             elif inst_head.channel & 0x40 == 0x40:
-                                multi_head = rd_mul_head(1)
+                                multi_head = player.rd_mul_head(1)
                                 self.insts.add(str(last_patch))
                                 self.insts[str(last_patch)].kmaps.add(
                                     self.file.rd_byte(
-                                        VirtualFile.gba_ptr_to_addr(
-                                            multi_head.kmap) + patch),
-                                    str(patch))
+                                        gba_ptr_to_addr(multi_head.kmap) + patch
+                                    ), str(patch))
                                 cdr = self.insts[str(last_patch)].kmaps[str(
                                     patch)].assign_dct
-                                inst_head = rd_inst_head(
+                                inst_head = player.rd_inst_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         multi_head.dct_tbl + cdr * 12))
-                                direct_head = rd_dct_head(1)
-                                noise_head = rd_nse_head(
+                                direct_head = player.rd_dct_head(1)
+                                noise_head = player.rd_nse_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         multi_head.dct_tbl + cdr * 12) + 2)
                                 self.insts[str(last_patch)].directs.add(
                                     str(cdr))
@@ -779,8 +770,8 @@ class Decoder(object):
                                         f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                     )
                             else:
-                                direct_head = rd_dct_head(1)
-                                noise_head = rd_nse_head(
+                                direct_head = player.rd_dct_head(1)
+                                noise_head = player.rd_nse_head(
                                     1, table_ptr + last_patch * 12 + 2)
                                 self.directs.add(str(last_patch))
                                 if self.directs[str(last_patch)].output in out:
@@ -788,21 +779,21 @@ class Decoder(object):
                                         self.directs[str(last_patch)],
                                         direct_head, samp_head, False)
                         else:
-                            inst_head = rd_inst_head(
+                            inst_head = player.rd_inst_head(
                                 1, table_ptr + last_patch * 12)
                             self.log.debug(
                                 f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PC EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                             )
                             if inst_head.channel & 0x80 == 0x80:
-                                drum_head = rd_drmkit_head(1)
-                                inst_head = rd_inst_head(
+                                drum_head = player.rd_drmkit_head(1)
+                                inst_head = player.rd_inst_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         drum_head.dct_tbl + patch * 12))
-                                direct_head = rd_dct_head(1)
-                                noise_head = rd_nse_head(
+                                direct_head = player.rd_dct_head(1)
+                                noise_head = player.rd_nse_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         drum_head.dct_tbl + patch * 12) + 2)
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
@@ -838,7 +829,7 @@ class Decoder(object):
                                             f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drmkits[str(last_patch)].directs[str(patch)]}'
                                         )
                             elif inst_head.channel & 0x40 == 0x40:
-                                multi_head = rd_mul_head(1)
+                                multi_head = player.rd_mul_head(1)
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
                                 )
@@ -847,19 +838,18 @@ class Decoder(object):
                                         patch) is False:
                                     self.insts[str(last_patch)].kmaps.add(
                                         self.file.rd_byte(
-                                            VirtualFile.gba_ptr_to_addr(
-                                                multi_head.kmap) + patch),
-                                        str(patch))
+                                            gba_ptr_to_addr(multi_head.kmap) +
+                                            patch), str(patch))
                                 cdr = self.insts[str(last_patch)].kmaps[str(
                                     patch)].assign_dct
-                                inst_head = rd_inst_head(
+                                inst_head = player.rd_inst_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         multi_head.dct_tbl + cdr * 12))
-                                direct_head = rd_dct_head(1)
-                                noise_head = rd_nse_head(
+                                direct_head = player.rd_dct_head(1)
+                                noise_head = player.rd_nse_head(
                                     1,
-                                    VirtualFile.gba_ptr_to_addr(
+                                    gba_ptr_to_addr(
                                         multi_head.dct_tbl + cdr * 12) + 2)
                                 self.log.debug(
                                     f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
@@ -900,9 +890,9 @@ class Decoder(object):
             elif 0x80 <= cmd <= 0xB0:
                 evt_queue.add(cticks, cmd)
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT WAIT | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00 | TIME: {stlen_to_ticks(cmd - 0x80):<#4x}'
+                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT WAIT | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00 | TIME: {player.stlen_to_ticks(cmd - 0x80):<#4x}'
                 )
-                cticks += stlen_to_ticks(cmd - 0x80)
+                cticks += player.stlen_to_ticks(cmd - 0x80)
                 pgm_ctr += 1
             if cmd in (0xB1, 0xB2, 0xB6):
                 self.log.debug(
@@ -916,39 +906,39 @@ class Decoder(object):
 
     def load_directsound(self, fpath: str) -> None:
         for smp in self.smp_pool:
-            smp: Sample
+            smp: core.Sample
             if smp.gb_wave is True:
                 if self.val(smp.smp_data) == 0:
-                    with open_new_file('temp.raw', 2) as f:
+                    with fileio.open_new_file('temp.raw', 2) as f:
                         f.wr_str(smp.smp_data)
                     smp.fmod_smp = self.load_sample('temp.raw')
-                    remove('temp.raw')
+                    os.remove('temp.raw')
                 else:
                     smp.fmod_smp = self.load_sample(fpath, smp.smp_data,
                                                     smp.size)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                    f'| FMOD | CODE: {fmod.getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
                 )
-                setLoopPoints(smp.fmod_smp, 0, 31)
+                fmod.setLoopPoints(smp.fmod_smp, 0, 31)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | SET LOOP   | 0-31')
+                    f'| FMOD | CODE: {fmod.getError():4} | SET LOOP   | 0-31')
                 continue
 
             if self.val(smp.smp_data) == 0:
-                with open_new_file('temp.raw', 2) as f:
+                with fileio.open_new_file('temp.raw', 2) as f:
                     f.wr_str(smp.smp_data)
                 smp.fmod_smp = self.load_sample(
                     'temp.raw', loop=smp.loop, gb_wave=False)
-                remove('temp.raw')
+                os.remove('temp.raw')
             else:
                 smp.fmod_smp = self.load_sample(fpath, smp.smp_data, smp.size,
                                                 smp.loop, False)
             self.log.debug(
-                f'| FMOD | CODE: {getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
+                f'| FMOD | CODE: {fmod.getError():4} | LOAD SMP   | S{smp.fmod_smp} | SIZE: {smp.size} |'
             )
-            setLoopPoints(smp.fmod_smp, smp.loop_start, smp.size - 1)
+            fmod.setLoopPoints(smp.fmod_smp, smp.loop_start, smp.size - 1)
             self.log.debug(
-                f'| FMOD | CODE: {getError():4} | SET LOOP   | {smp.loop_start}-{smp.size - 1}'
+                f'| FMOD | CODE: {fmod.getError():4} | SET LOOP   | {smp.loop_start}-{smp.size - 1}'
             )
 
     def load_square(self) -> None:
@@ -969,17 +959,17 @@ class Decoder(object):
                 sample.smp_data = "".join(l + r)
             sample.freq = 7040
             sample.size = 32
-            with open_new_file(f_sq, 2) as f:
+            with fileio.open_new_file(f_sq, 2) as f:
                 f.wr_str(sample.smp_data)
 
             sample.fmod_smp = self.load_sample(f_sq, 0, 0)
             self.log.debug(
-                f'| FMOD | CODE: {getError():4} | LOAD SQRE{mx2} | S{sample.fmod_smp}'
+                f'| FMOD | CODE: {fmod.getError():4} | LOAD SQRE{mx2} | S{sample.fmod_smp}'
             )
-            setLoopPoints(sample.fmod_smp, 0, 31)
+            fmod.setLoopPoints(sample.fmod_smp, 0, 31)
             self.log.debug(
-                f'| FMOD | CODE: {getError():4} | SET LOOP   | (00, 31)')
-            remove(f_sq)
+                f'| FMOD | CODE: {fmod.getError():4} | SET LOOP   | (00, 31)')
+            os.remove(f_sq)
 
     def load_noise(self) -> None:
         for i in range(10):
@@ -990,16 +980,17 @@ class Decoder(object):
                 smp.smp_data = self.nse_wavs[0][i]
                 smp.freq = 7040
                 smp.size = 16384
-                with open_new_file(f_nse, 2) as f:
+                with fileio.open_new_file(f_nse, 2) as f:
                     f.wr_str(smp.smp_data)
                 smp.fmod_smp = self.load_sample(f_nse)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | LOAD NSE0{i} | S{smp.fmod_smp}'
+                    f'| FMOD | CODE: {fmod.getError():4} | LOAD NSE0{i} | S{smp.fmod_smp}'
                 )
-                setLoopPoints(smp.fmod_smp, 0, 16383)
+                fmod.setLoopPoints(smp.fmod_smp, 0, 16383)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 16383)')
-                remove(f_nse)
+                    f'| FMOD | CODE: {fmod.getError():4} | SET LOOP   | (0, 16383)'
+                )
+                os.remove(f_nse)
 
             nse = f'noise1{i}'
             self.smp_pool.add(nse)
@@ -1008,31 +999,32 @@ class Decoder(object):
                 smp.smp_data = self.nse_wavs[1][i]
                 smp.freq = 7040
                 smp.size = 256
-                with open_new_file(f_nse, 2) as f:
+                with fileio.open_new_file(f_nse, 2) as f:
                     f.wr_str(smp.smp_data)
                 smp.fmod_smp = self.load_sample(f_nse)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | LOAD NSE1{i} | S{smp.fmod_smp}'
+                    f'| FMOD | CODE: {fmod.getError():4} | LOAD NSE1{i} | S{smp.fmod_smp}'
                 )
-                setLoopPoints(smp.fmod_smp, 0, 255)
+                fmod.setLoopPoints(smp.fmod_smp, 0, 255)
                 self.log.debug(
-                    f'| FMOD | CODE: {getError():4} | SET LOOP   | (0, 255)')
-                remove(f_nse)
+                    f'| FMOD | CODE: {fmod.getError():4} | SET LOOP   | (0, 255)'
+                )
+                os.remove(f_nse)
 
     def init_player(self, fpath: str) -> None:
-        setOutput(1)
-        systemInit(44100, 64, 0)
-        self.log.debug(f'| FMOD | CODE: {getError():4} | INIT       |')
-        setMasterVolume(self.gbl_vol)
+        fmod.setOutput(1)
+        fmod.systemInit(44100, 64, 0)
+        self.log.debug(f'| FMOD | CODE: {fmod.getError():4} | INIT       |')
+        fmod.setMasterVolume(self.gbl_vol)
         self.log.debug(
-            f'| FMOD | CODE: {getError():4} | SET VOL    | {self.gbl_vol}')
+            f'| FMOD | CODE: {fmod.getError():4} | SET VOL    | {self.gbl_vol}')
 
         self.load_directsound(fpath)
         self.load_noise()
         self.load_square()
 
         self.file.close()
-        self.log.debug(f'| FMOD | CODE: {getError():4} | FINISH     |')
+        self.log.debug(f'| FMOD | CODE: {fmod.getError():4} | FINISH     |')
 
     def load_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None):
         """Load a song from ROM into memory.
@@ -1044,7 +1036,7 @@ class Decoder(object):
 
         self.reset_player()
 
-        self.file = open_file(fpath, 1)
+        self.file = fileio.open_file(fpath, 1)
         header_ptr = self.file.rd_gba_ptr(sng_list_ptr + sng_num * 8)
         num_tracks = self.file.rd_byte(header_ptr)
         unk = self.file.rd_byte()
@@ -1052,7 +1044,8 @@ class Decoder(object):
         echo = self.file.rd_byte()
         inst_table_ptr = self.file.rd_gba_ptr()
 
-        self.channels = ChannelQueue([Channel() for i in range(num_tracks)])
+        self.channels = core.ChannelQueue(
+            [core.Channel() for i in range(num_tracks)])
         for track_num, channel in enumerate(self.channels):
             self.load_events(channel, header_ptr, inst_table_ptr, track_num)
 
@@ -1060,20 +1053,20 @@ class Decoder(object):
 
     def load_sample(self,
                     fpath: str,
-                    offset: Union[int, str] = 0,
+                    offset: typing.Union[int, str] = 0,
                     size: int = 0,
                     loop: bool = True,
                     gb_wave: bool = True):
-        mode = FSoundModes._8BITS + FSoundModes.LOADRAW + FSoundModes.MONO
+        mode = fmod.FSoundModes._8BITS + fmod.FSoundModes.LOADRAW + fmod.FSoundModes.MONO
         if loop:
-            mode += FSoundModes.LOOP_NORMAL
+            mode += fmod.FSoundModes.LOOP_NORMAL
         if gb_wave:
-            mode += FSoundModes.UNSIGNED
+            mode += fmod.FSoundModes.UNSIGNED
         else:
-            mode += FSoundModes.SIGNED
+            mode += fmod.FSoundModes.SIGNED
         fpath = fpath.encode('ascii')
-        index = FSoundChannelSampleMode.FREE
-        return sampleLoad(index, fpath, mode, offset, size)
+        index = fmod.FSoundChannelSampleMode.FREE
+        return fmod.sampleLoad(index, fpath, mode, offset, size)
 
     def smp_exists(self, smp_id: int) -> bool:
         """Check if a sample exists in the available sample pool."""
@@ -1085,14 +1078,14 @@ class Decoder(object):
     def stop_song(self):
         """Stop playing a song."""
         try:
-            VirtualFile.from_id(1).close()
+            fileio.fileio.VirtualFile.from_id(1).close()
         except AttributeError:
             pass
-        systemClose()
+        fmod.systemClose()
 
     def update_notes(self) -> None:
         for item in self.note_arr:
-            item: Note
+            item: core.Note
             if item.enable and item.wait_ticks > 0:
                 item.wait_ticks -= 1
             if item.wait_ticks <= 0 and item.enable is True and item.note_off is False:
@@ -1110,7 +1103,7 @@ class Decoder(object):
             if chan.wait_ticks > 0:
                 chan.wait_ticks -= 1
             while chan.wait_ticks <= 0:
-                evt_queue: Event = chan.evt_queue[chan.pgm_ctr]
+                evt_queue: core.Event = chan.evt_queue[chan.pgm_ctr]
                 cmd_byte = evt_queue.cmd_byte
                 args = evt_queue.arg1, evt_queue.arg2, evt_queue.arg3
 
@@ -1137,7 +1130,7 @@ class Decoder(object):
                     )
                     chan.pgm_ctr += 1
                 elif cmd_byte == 0xBC:
-                    chan.transpose = sbyte_to_int(args[0])
+                    chan.transpose = player.sbyte_to_int(args[0])
                     self.log.debug(
                         f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET TRNPSE | TRNPSE: {chan.transpose:2}'
                     )
@@ -1147,11 +1140,11 @@ class Decoder(object):
                     if self.dct_exists(self.directs, chan.patch_num):
                         chan.output = self.directs[str(chan.patch_num)].output
                     elif self.inst_exists(chan.patch_num):
-                        chan.output = ChannelTypes.MULTI
+                        chan.output = core.ChannelTypes.MULTI
                     elif self.drm_exists(chan.patch_num):
-                        chan.output = ChannelTypes.DRUMKIT
+                        chan.output = core.ChannelTypes.DRUMKIT
                     else:
-                        chan.output = ChannelTypes.NULL
+                        chan.output = core.ChannelTypes.NULL
                     self.log.debug(
                         f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | SET OUTPUT | PATCH: {chan.patch_num:3} | T: {chan.output.name:>7}'
                     )
@@ -1159,7 +1152,7 @@ class Decoder(object):
                 elif cmd_byte == 0xBE:
                     chan.main_vol = args[0]
                     for nid in chan.notes:
-                        note: Note = self.note_arr[nid.note_id]
+                        note: core.Note = self.note_arr[nid.note_id]
                         if not note.enable or note.parent != plat:
                             continue
                         iv = note.velocity / 0x7F
@@ -1168,9 +1161,9 @@ class Decoder(object):
                         dav = iv * cv * ie * 255
                         vol = 0 if chan.mute else int(dav)
                         chan.volume = vol
-                        setVolume(note.fmod_channel, vol)
+                        fmod.setVolume(note.fmod_channel, vol)
                         self.log.debug(
-                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {getError():4} | SET VOLUME | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | VOL: {chan.main_vol:5} | DAV: {dav:5}'
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {fmod.getError():4} | SET VOLUME | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | VOL: {chan.main_vol:5} | DAV: {dav:5}'
                         )
                     chan.pgm_ctr += 1
                 elif cmd_byte == 0xBF:
@@ -1180,27 +1173,27 @@ class Decoder(object):
                         note = self.note_arr[nid.note_id]
                         if not note.enable or note.parent != plat:
                             continue
-                        setPan(note.fmod_channel, pan)
+                        fmod.setPan(note.fmod_channel, pan)
                         self.log.debug(
-                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {getError():4} | SET PAN    | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | PAN: {chan.panning:5} | DAP: {pan:5}'
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | CODE: {fmod.getError():4} | SET PAN    | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | PAN: {chan.panning:5} | DAP: {pan:5}'
                         )
                     chan.pgm_ctr += 1
                 elif cmd_byte in (0xC0, 0xC1):
                     if cmd_byte == 0xC0:
                         chan.pitch_bend = args[0]
                     else:
-                        chan.pitch_range = sbyte_to_int(args[0])
+                        chan.pitch_range = player.sbyte_to_int(args[0])
                     chan.pgm_ctr += 1
                     for nid in chan.notes:
-                        note: Note = self.note_arr[nid.note_id]
+                        note: core.Note = self.note_arr[nid.note_id]
                         if not note.enable or note.parent != plat:
                             continue
                         pitch = (
                             chan.pitch_bend - 0x40) / 0x40 * chan.pitch_range
                         freq = int(note.freq * math.pow(BASE, pitch))
-                        setFrequency(note.fmod_channel, freq)
+                        fmod.setFrequency(note.fmod_channel, freq)
                         self.log.debug(
-                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | PBEND      | CODE: {getError():4} | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | BEND: {chan.pitch_bend:4} | DAP: {freq:5}'
+                            f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | PBEND      | CODE: {fmod.getError():4} | FMOD: {note.fmod_channel:4} | NOTE: {nid.note_id:>4} | BEND: {chan.pitch_bend:4} | DAP: {freq:5}'
                         )
                 elif cmd_byte == 0xC2:
                     chan.vib_rate = chan.evt_queue[chan.pgm_ctr].arg1
@@ -1217,7 +1210,7 @@ class Decoder(object):
                 elif cmd_byte == 0xCE:
                     chan.sustain = False
                     for nid in chan.notes:
-                        note: Note = self.note_arr[nid.note_id]
+                        note: core.Note = self.note_arr[nid.note_id]
                         if not note.enable or note.note_off:
                             continue
                         note.reset()
@@ -1248,7 +1241,7 @@ class Decoder(object):
                     else:
                         chan.pgm_ctr += 1
                     for nid in chan.notes:
-                        note: Note = self.note_arr[nid.note_id]
+                        note: core.Note = self.note_arr[nid.note_id]
                         note.reset()
                         if note.note_num in chan.playing:
                             chan.playing.remove(note.note_num)
@@ -1258,7 +1251,7 @@ class Decoder(object):
                     chan.pgm_ctr = chan.loop_ptr
                     chan.sustain = False
                     for nid in chan.notes:
-                        note: Note = self.note_arr[nid.note_id]
+                        note: core.Note = self.note_arr[nid.note_id]
                         note.reset()
                         if note.note_num in chan.playing:
                             chan.playing.remove(note.note_num)
@@ -1266,14 +1259,14 @@ class Decoder(object):
                         f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | JUMP ADDR  | PTR: {chan.loop_ptr:<#5x}'
                     )
                 elif cmd_byte >= 0xCF:
-                    ll = stlen_to_ticks(cmd_byte - 0xCF) + 1
+                    ll = player.stlen_to_ticks(cmd_byte - 0xCF) + 1
                     if cmd_byte == 0xCF:
                         chan.sustain = True
                         ll = -1
                     nn, vv, uu = args
                     self.note_q.add(nn, vv, plat, uu, ll, chan.patch_num)
                     self.log.debug(
-                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | ADD NOTE   | NOTE: {note_to_name(nn):>4} | VEL: {vv:5} | LEN: {ll:5} | PATCH: {chan.patch_num:3}'
+                        f'| CHAN: {plat:>4} | PGM: {chan.pgm_ctr:<#5x} | CTRL: {cmd_byte:<#4x} | ADD NOTE   | NOTE: {player.note_to_name(nn):>4} | VEL: {vv:5} | LEN: {ll:5} | PATCH: {chan.patch_num:3}'
                     )
                     chan.pgm_ctr += 1
                 elif cmd_byte <= 0xB0:
@@ -1309,7 +1302,7 @@ class Decoder(object):
                 pitch = (
                     chan.pitch_bend - 0x40 + v_pos) / 0x40 * chan.pitch_range
                 freq = int(item.freq * math.pow(BASE, pitch))
-                setFrequency(item.fmod_channel, freq)
+                fmod.setFrequency(item.fmod_channel, freq)
                 item.vib_pos += 1 / (96 / chan.vib_rate)
                 item.vib_pos = math.fmod(item.vib_pos, 2)
 
@@ -1318,7 +1311,7 @@ class Decoder(object):
         for item in self.note_q:
             x = self.free_note()
             self.log.debug(
-                f'| FREE NOTE  | NOTE: {x:4} | ID: {note_to_name(item.note_num):>6} |'
+                f'| FREE NOTE  | NOTE: {x:4} | ID: {player.note_to_name(item.note_num):>6} |'
             )
             if x == 255:
                 continue
@@ -1334,11 +1327,9 @@ class Decoder(object):
                             if note.wait_ticks == -1:
                                 if not chan.sustain:
                                     note.reset()
-                            elif note.wait_ticks == 0:
-                                if chan.sustain:
-                                    note.reset()
                             else:
-                                note.reset()
+                                if chan.sustain and note.wait_ticks == 1:
+                                    note.reset()
                             if note.note_num in chan.playing:
                                 chan.playing.remove(note.note_num)
                             self.log.debug(
@@ -1350,8 +1341,8 @@ class Decoder(object):
                     chan.playing.append(self.note_arr[x].note_num)
                 pat = item.patch_num
                 nn = item.note_num
-                std_out = (DirectTypes.DIRECT, DirectTypes.WAVE)
-                sqr_out = (DirectTypes.SQUARE1, DirectTypes.SQUARE2)
+                std_out = (core.DirectTypes.DIRECT, core.DirectTypes.WAVE)
+                sqr_out = (core.DirectTypes.SQUARE1, core.DirectTypes.SQUARE2)
                 if self.dct_exists(self.directs, pat):
                     self.note_arr[x].output = self.directs[str(pat)].output
                     self.note_arr[x].env_attn = self.directs[str(pat)].env_attn
@@ -1361,10 +1352,11 @@ class Decoder(object):
                     self.log.debug(
                         f'| CHAN: {item.parent:>4} | DCT EXISTS | NOTE: {x:4} | T: {self.note_arr[x].output:>7} | ATTN: {self.note_arr[x].env_attn:4} | DCY: {self.note_arr[x].env_dcy:5} | SUS: {self.note_arr[x].env_sus:5} | REL: {self.note_arr[x].env_rel:5}'
                     )
-                    if DirectTypes(self.directs[str(pat)].output) in std_out:
+                    if core.DirectTypes(
+                            self.directs[str(pat)].output) in std_out:
                         das = str(self.directs[str(pat)].smp_id)
                         #input()
-                        daf = note_to_freq(
+                        daf = player.note_to_freq(
                             nn + (60 - self.directs[str(pat)].drum_key),
                             self.smp_pool[das].freq)
                         if self.smp_pool[das].gb_wave:
@@ -1372,19 +1364,20 @@ class Decoder(object):
                         self.log.debug(
                             f'| CHAN: {item.parent:>4} | DCT EXISTS | NOTE: {x:4} | STD OUT    | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
                         )
-                    elif DirectTypes(self.directs[str(pat)].output) in sqr_out:
+                    elif core.DirectTypes(
+                            self.directs[str(pat)].output) in sqr_out:
                         das = f'square{self.directs[str(pat)].gb1 % 4}'
-                        daf = note_to_freq(
+                        daf = player.note_to_freq(
                             nn + (60 - self.directs[str(pat)].drum_key))
-                    elif DirectTypes(self.directs[str(pat)]
-                                     .output) == DirectTypes.NOISE:
-                        das = f'noise{self.directs[str(pat)].gb1 % 2}{int(random() * 3)}'
-                        daf = note_to_freq(
+                    elif core.DirectTypes(self.directs[str(pat)]
+                                          .output) == core.DirectTypes.NOISE:
+                        das = f'noise{self.directs[str(pat)].gb1 % 2}{int(random.random() * 3)}'
+                        daf = player.note_to_freq(
                             nn + (60 - self.directs[str(pat)].drum_key))
                     else:
                         das = ''
                 elif self.inst_exists(pat):
-                    dct: Direct = self.insts[str(pat)].directs[str(
+                    dct: core.Direct = self.insts[str(pat)].directs[str(
                         self.insts[str(pat)].kmaps[str(nn)].assign_dct)]
                     self.note_arr[x].output = dct.output
                     self.note_arr[x].env_attn = dct.env_attn
@@ -1399,19 +1392,19 @@ class Decoder(object):
                         if dct.fix_pitch:
                             daf = self.smp_pool[das].freq
                         else:
-                            daf = note_to_freq(nn, -2
-                                               if self.smp_pool[das].gb_wave
-                                               else self.smp_pool[das].freq)
+                            daf = player.note_to_freq(
+                                nn, -2 if self.smp_pool[das].gb_wave else
+                                self.smp_pool[das].freq)
                         self.log.debug(
                             f'| CHAN: {item.parent:>4} | INST EXIST | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | DAS: {das:>18} | DAF: {daf:>18}'
                         )
                     elif dct.output in sqr_out:
                         das = f'square{dct.gb1 % 4}'
-                        daf = note_to_freq(nn)
+                        daf = player.note_to_freq(nn)
                     else:
                         das = ''
                 elif self.drm_exists(pat):
-                    dct: Direct = self.drmkits[str(pat)].directs[str(nn)]
+                    dct: core.Direct = self.drmkits[str(pat)].directs[str(nn)]
                     self.note_arr[x].output = dct.output
                     self.note_arr[x].env_attn = dct.env_attn
                     self.note_arr[x].env_dcy = dct.env_dcy
@@ -1425,18 +1418,18 @@ class Decoder(object):
                         if dct.fix_pitch and not self.smp_pool[das].gb_wave:
                             daf = self.smp_pool[das].freq
                         else:
-                            daf = note_to_freq(dct.drum_key, -2
-                                               if self.smp_pool[das].gb_wave
-                                               else self.smp_pool[das].freq)
+                            daf = player.note_to_freq(
+                                dct.drum_key, -2 if self.smp_pool[das].gb_wave
+                                else self.smp_pool[das].freq)
                         self.log.debug(
                             f'| CHAN: {item.parent:>4} | DRM EXISTS | NOTE: {x:4} | STD OUT    | FIX: {dct.fix_pitch:5} | GB: {self.smp_pool[das].gb_wave:6} | DAS: {das:>18} | DAF: {daf:>18}'
                         )
                     elif dct.output in sqr_out:
                         das = f'square{dct.gb1 % 4}'
-                        daf = note_to_freq(dct.drum_key)
-                    elif dct.output == DirectTypes.NOISE:
-                        das = f'noise{dct.gb1 % 2}{int(random() * 10)}'
-                        daf = note_to_freq(dct.drum_key)
+                        daf = player.note_to_freq(dct.drum_key)
+                    elif dct.output == core.DirectTypes.NOISE:
+                        das = f'noise{dct.gb1 % 2}{int(random.random() * 10)}'
+                        daf = player.note_to_freq(dct.drum_key)
                     else:
                         das = ''
                 else:
@@ -1447,49 +1440,49 @@ class Decoder(object):
                 daf = daf * math.pow(BASE, self.transpose)
                 dav = (item.velocity / 0x7F) * (chan.main_vol / 0x7F) * 255
                 out_type = self.note_arr[x].output
-                if out_type == NoteTypes.SQUARE1:
+                if out_type == core.NoteTypes.SQUARE1:
                     if self.gb1_chan < 32:
                         with self.note_arr[self.gb1_chan] as gbn:
-                            gbn: Note
-                            stopSound(gbn.fmod_channel)
+                            gbn: core.Note
+                            fmod.stopSound(gbn.fmod_channel)
                             self.log.debug(
-                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SQ1   | F{gbn.fmod_channel:<9}'
+                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP SQ1   | F{gbn.fmod_channel:<9}'
                             )
                             gbn.fmod_channel = 0
                             self.channels[gbn.parent].notes.remove(
                                 str(self.gb1_chan))
                             gbn.enable = False
                     self.gb1_chan = x
-                elif out_type == NoteTypes.SQUARE2:
+                elif out_type == core.NoteTypes.SQUARE2:
                     if self.gb2_chan < 32:
                         with self.note_arr[self.gb2_chan] as gbn:
-                            stopSound(gbn.fmod_channel)
+                            fmod.stopSound(gbn.fmod_channel)
                             self.log.debug(
-                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SQ2   | F{gbn.fmod_channel:<9}'
+                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP SQ2   | F{gbn.fmod_channel:<9}'
                             )
                             gbn.fmod_channel = 0
                             self.channels[gbn.parent].notes.remove(
                                 str(self.gb2_chan))
                             gbn.enable = False
                     self.gb2_chan = x
-                elif out_type == NoteTypes.WAVE:
+                elif out_type == core.NoteTypes.WAVE:
                     if self.gb3_chan < 32:
                         with self.note_arr[self.gb3_chan] as gbn:
-                            stopSound(gbn.fmod_channel)
+                            fmod.stopSound(gbn.fmod_channel)
                             self.log.debug(
-                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP WAV   | F{gbn.fmod_channel:<9}'
+                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP WAV   | F{gbn.fmod_channel:<9}'
                             )
                             gbn.fmod_channel = 0
                             self.channels[gbn.parent].notes.remove(
                                 str(self.gb3_chan))
                             gbn.enable = False
                     self.gb3_chan = x
-                elif out_type == NoteTypes.NOISE:
+                elif out_type == core.NoteTypes.NOISE:
                     if self.gb4_chan < 32:
                         with self.note_arr[self.gb4_chan] as gbn:
-                            stopSound(gbn.fmod_channel)
+                            fmod.stopSound(gbn.fmod_channel)
                             self.log.debug(
-                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP NSE   | F{gbn.fmod_channel:<9}'
+                                f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP NSE   | F{gbn.fmod_channel:<9}'
                             )
                             gbn.fmod_channel = 0
                             self.channels[gbn.parent].notes.remove(
@@ -1502,78 +1495,77 @@ class Decoder(object):
                 pan = chan.panning * 2
                 vol = 0 if chan.mute else int(dav)
                 chan.volume = vol
-                self.note_arr[x]: Note
+                self.note_arr[x]: core.Note
                 self.note_arr[x].freq = daf
-                self.note_arr[x].phase = NotePhases.INITIAL
-                if self.note_arr[x].output == NoteTypes.NOISE:
+                self.note_arr[x].phase = core.NotePhases.INITIAL
+                if self.note_arr[x].output == core.NoteTypes.NOISE:
                     continue
 
-                self.note_arr[x].fmod_channel = playSound(
+                self.note_arr[x].fmod_channel = fmod.playSound(
                     x, self.smp_pool[das].fmod_smp, None, True)
 
-                self.note_arr[x].fmod_fx = enableFX(
+                self.note_arr[x].fmod_fx = fmod.enableFX(
                     self.note_arr[x].fmod_channel, 3)
-                setEcho(self.note_arr[x].fmod_fx, 0, 0, 333, 333, False)
-                setFrequency(self.note_arr[x].fmod_channel, freq)
-                setVolume(self.note_arr[x].fmod_channel, vol)
-                setPan(self.note_arr[x].fmod_channel, pan)
-                setPaused(self.note_arr[x].fmod_channel, False)
-                assert getError() == 0
+                fmod.setEcho(self.note_arr[x].fmod_fx, 0, 0, 333, 333, False)
+                fmod.setFrequency(self.note_arr[x].fmod_channel, freq)
+                fmod.setVolume(self.note_arr[x].fmod_channel, vol)
+                fmod.setPan(self.note_arr[x].fmod_channel, pan)
+                fmod.setPaused(self.note_arr[x].fmod_channel, False)
+                assert fmod.getError() == 0
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | PLAY SOUND | F{self.note_arr[x].fmod_channel:<9} | DAS: {das:<5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | PLAY SOUND | F{self.note_arr[x].fmod_channel:<9} | DAS: {das:<5}'
                 )
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET FREQ   | DAF: {daf:>5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | SET FREQ   | DAF: {daf:>5}'
                 )
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET VOLUME | VOL: {vol:>5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | SET VOLUME | VOL: {vol:>5}'
                 )
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET PAN    | PAN: {pan:>5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | SET PAN    | PAN: {pan:>5}'
                 )
         self.note_q.clear()
 
     def advance_notes(self) -> None:
-        for i, item in enumerate(self.note_arr):
-            #item = self.note_arr[i]
+        for note_id, item in enumerate(self.note_arr):
             if item.enable is False:
                 continue
-            if item.output == NoteTypes.DIRECT:
-                if item.note_off and item.phase < NotePhases.RELEASE:
+            if item.output == core.NoteTypes.DIRECT:
+                if item.note_off and item.phase < core.NotePhases.RELEASE:
                     item.env_step = 0
-                    item.phase = NotePhases.RELEASE
+                    item.phase = core.NotePhases.RELEASE
                 if item.env_step == 0 or (item.env_pos == item.env_dest) or (
                         item.env_step == 0 and
                     (item.env_pos <= item.env_dest)) or (
                         item.env_step >= 0 and item.env_pos >= item.env_dest):
                     phase = item.phase
-                    if phase == NotePhases.INITIAL:
-                        item.phase = NotePhases.ATTACK
+                    if phase == core.NotePhases.INITIAL:
+                        item.phase = core.NotePhases.ATTACK
                         item.env_pos = 0
                         item.env_dest = 255
                         item.env_step = item.env_attn
-                    elif phase == NotePhases.ATTACK:
-                        item.phase = NotePhases.DECAY
+                    elif phase == core.NotePhases.ATTACK:
+                        item.phase = core.NotePhases.DECAY
                         item.env_dest = item.env_sus
                         item.env_step = (item.env_dcy - 0x100) / 2
-                    elif phase == NotePhases.DECAY:
-                        item.phase = NotePhases.SUSTAIN
+                    elif phase == core.NotePhases.DECAY:
+                        item.phase = core.NotePhases.SUSTAIN
                         item.env_step = 0
-                    elif phase == NotePhases.SUSTAIN:
-                        item.phase = NotePhases.SUSTAIN
+                    elif phase == core.NotePhases.SUSTAIN:
+                        item.phase = core.NotePhases.SUSTAIN
                         item.env_step = 0
-                    elif phase == NotePhases.RELEASE:
-                        item.phase = NotePhases.NOTEOFF
+                    elif phase == core.NotePhases.RELEASE:
+                        item.phase = core.NotePhases.NOTEOFF
                         item.env_dest = 0
                         item.env_step = item.env_rel - 0x100
-                    elif phase == NotePhases.NOTEOFF:
-                        stopSound(item.fmod_channel)
-                        disableFX(item.fmod_channel)
+                    elif phase == core.NotePhases.NOTEOFF:
+                        fmod.stopSound(item.fmod_channel)
+                        fmod.disableFX(item.fmod_channel)
                         self.log.debug(
-                            f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP DSMP  | F{item.fmod_channel:<9}'
+                            f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP DSMP  | F{item.fmod_channel:<9}'
                         )
                         item.fmod_channel = 0
-                        self.channels[item.parent].notes.remove(str(i))
+                        self.channels[item.parent].notes.remove(str(note_id))
                         item.enable = False
                 nex = item.env_pos + item.env_step
                 if nex > item.env_dest and item.env_step > 0:
@@ -1586,55 +1578,55 @@ class Decoder(object):
                         item.env_pos / 0xFF) * 255
                 vol = int(0 if self.channels[item.parent].mute else dav)
                 self.channels[item.parent].volume = vol
-                setVolume(item.fmod_channel, vol)
+                fmod.setVolume(item.fmod_channel, vol)
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET DVOL   | VOL: {vol:>5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | SET DVOL   | VOL: {vol:>5}'
                 )
             else:
-                if item.note_off and item.phase < NotePhases.RELEASE:
+                if item.note_off and item.phase < core.NotePhases.RELEASE:
                     item.env_step = 0
-                    item.phase = NotePhases.RELEASE
+                    item.phase = core.NotePhases.RELEASE
                 if item.env_step == 0 or (item.env_pos == item.env_dest) or (
                         item.env_step == 0 and
                     (item.env_pos <= item.env_dest)) or (
                         item.env_step >= 0 and item.env_pos >= item.env_dest):
-                    phase: NotePhases = item.phase
-                    if phase == NotePhases.INITIAL:
-                        item.phase = NotePhases.ATTACK
+                    phase: core.NotePhases = item.phase
+                    if phase == core.NotePhases.INITIAL:
+                        item.phase = core.NotePhases.ATTACK
                         item.env_pos = 0
                         item.env_dest = 255
                         item.env_step = 0x100 - (item.env_attn * 8)
-                    elif phase == NotePhases.ATTACK:
-                        item.phase = NotePhases.DECAY
+                    elif phase == core.NotePhases.ATTACK:
+                        item.phase = core.NotePhases.DECAY
                         item.env_dest = 255 / item.env_sus * 2
                         item.env_step = (-item.env_dcy) / 2
-                    elif phase == NotePhases.DECAY:
-                        item.phase = NotePhases.SUSTAIN
+                    elif phase == core.NotePhases.DECAY:
+                        item.phase = core.NotePhases.SUSTAIN
                         item.env_step = 0
-                    elif phase == NotePhases.SUSTAIN:
-                        item.phase = NotePhases.SUSTAIN
+                    elif phase == core.NotePhases.SUSTAIN:
+                        item.phase = core.NotePhases.SUSTAIN
                         item.env_step = 0
-                    elif phase == NotePhases.RELEASE:
-                        item.phase = NotePhases.NOTEOFF
+                    elif phase == core.NotePhases.RELEASE:
+                        item.phase = core.NotePhases.NOTEOFF
                         item.env_dest = 0
                         item.env_step = (0x8 - item.env_rel) * 2
-                    elif phase == NotePhases.NOTEOFF:
+                    elif phase == core.NotePhases.NOTEOFF:
                         out_type = item.output
-                        if out_type == NoteTypes.SQUARE1:
+                        if out_type == core.NoteTypes.SQUARE1:
                             self.gb1_chan = 255
-                        elif out_type == NoteTypes.SQUARE2:
+                        elif out_type == core.NoteTypes.SQUARE2:
                             self.gb2_chan = 255
-                        elif out_type == NoteTypes.WAVE:
+                        elif out_type == core.NoteTypes.WAVE:
                             self.gb3_chan = 255
-                        elif out_type == NoteTypes.NOISE:
+                        elif out_type == core.NoteTypes.NOISE:
                             self.gb4_chan = 255
-                        stopSound(item.fmod_channel)
-                        disableFX(item.fmod_channel)
+                        fmod.stopSound(item.fmod_channel)
+                        fmod.disableFX(item.fmod_channel)
                         self.log.debug(
-                            f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | STOP SOUND | F{item.fmod_channel:<9}'
+                            f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | STOP SOUND | F{item.fmod_channel:<9}'
                         )
                         item.fmod_channel = 0
-                        self.channels[item.parent].notes.remove(str(i))
+                        self.channels[item.parent].notes.remove(str(note_id))
                         item.enable = False
                 nex = item.env_pos + item.env_step
                 if nex > item.env_dest and item.env_step > 0:
@@ -1647,19 +1639,16 @@ class Decoder(object):
                         item.env_pos / 0xFF) * 255
                 vol = int(0 if self.channels[item.parent].mute else dav)
                 self.channels[item.parent].volume = vol
-                setVolume(item.fmod_channel, vol)
+                fmod.setVolume(item.fmod_channel, vol)
                 self.log.debug(
-                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {getError():4} | SET VOLUME | VOL: {vol:>5}'
+                    f'| CHAN: {item.parent:>4} | FMOD EXEC  | CODE: {fmod.getError():4} | SET VOLUME | VOL: {vol:>5}'
                 )
 
     def evt_processor_timer(self) -> None:
         self.update_vibrato()
 
+        self.display()
         if self.tick_ctr:
-            template = '|{:33}' * self.channels.count
-            out = self.update_interface()
-            stdout.write(template.format(*out) + '\r')
-            stdout.flush()
             self.update_notes()
             self.update_channels()
 
@@ -1684,30 +1673,42 @@ class Decoder(object):
         self.update_channels()
         top = []
         for i, c in enumerate(self.channels):
-            top.append(f'| CHANNEL {i:<2} {c.output.name:>20} ')
+            top.append(f'| CHAN{i:<2}{c.output.name:>{self.WIDTH - 8}} ')
         top = ''.join(top)
-        bottom = '+' + '+'.join(['-' * 33] * self.channels.count)
+        bottom = '+' + '+'.join([f'{"":->{self.WIDTH}}'] * self.channels.count)
         return top + '\n' + bottom
 
+    def display(self) -> None:
+        out = self.update_interface()
+        sys.stdout.write(out + '\r')
+        sys.stdout.flush()
+
     def update_interface(self) -> str:
-
-        out = []
+        lines = []
         for c in self.channels:
-            c: Channel
-            vol = c.volume // 16
-            bar = vol * "="
+            c: core.Channel
+            vol = c.volume // (256 // (self.WIDTH - 1)) // 2
+            #print(c.volume, vol)
+            bar = f'{"":=>{vol}}'
+            #bar = vol * "="
             notes = []
-            for n in map(note_to_name, c.playing):
-                notes.append(f'{n:>3}')
-            notes.append(f'{c.wait_ticks:<3}')
-            notes = ' '.join(notes)
-            double_bar = list(f'{bar + "|" + bar:^33}')
-            insert_pt = len(double_bar) - len(notes)
+            for n in map(player.note_to_name, c.playing):
+                notes.append(f'{n:<3}')
+            notes.append(f'{c.wait_ticks:^3}')
+            notes = ''.join(notes)
+            double_bar = list(f'{bar + "|" + bar:^{self.WIDTH}}')
+            vol = str(c.volume)
+            double_bar[1:len(vol) + 1] = vol
+            insert_pt = self.WIDTH - len(notes)
             double_bar[insert_pt:] = notes
-            double_bar[round(c.panning / 4)] = ':'
+            insert_pt = round(c.panning / (128 / (self.WIDTH - 1)))
+            double_bar[insert_pt] = ':'
             bar = ''.join(double_bar)
-            out.append(f'{bar:^33}')
-
+            lines.append(f'{bar:^{self.WIDTH - 1}}')
+        out = ['']
+        for line in lines:
+            out.append(f'{line:{self.WIDTH - 1}}')
+        out = '|'.join(out)
         return out
 
     def play_song(self, fpath: str, song_num: int, song_table: int) -> None:
@@ -1718,10 +1719,9 @@ class Decoder(object):
 
     def process(self):
         e = self.evt_processor_timer
-
-        s = sleep
+        s = time.sleep
         r = round
-        t = time
+        t = time.time
         while True:
             st = t()
             if e() is None:
@@ -1732,7 +1732,7 @@ class Decoder(object):
                 continue
             s(r(tm - (t() - st), 3))
 
-    def val(self, expr: str) -> Union[float, int]:
+    def val(self, expr: str) -> typing.Union[float, int]:
         if expr is None:
             return None
         try:
@@ -1805,3 +1805,9 @@ class Decoder(object):
                 return eval(''.join(out))
             except SyntaxError:
                 return 0
+
+
+class Interface(object):
+
+    def __init__(self):
+        pass

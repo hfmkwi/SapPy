@@ -4,6 +4,8 @@ import ctypes
 from ctypes import POINTER, Structure, c_bool, c_float, c_int, c_uint, windll
 from enum import IntEnum, auto
 from typing import List, NamedTuple
+import sys
+import os
 
 __all__ = ('FModErrors', 'FSoundModes', 'FSoundChannelSampleMode', 'get_err',
            'get_err_str', 'systemInit', 'setVolume', 'getError', 'sampleLoad',
@@ -14,7 +16,9 @@ __all__ = ('FModErrors', 'FSoundModes', 'FSoundChannelSampleMode', 'get_err',
 
 FMOD_VERSION = 3.75
 
-fmod            = windll.fmod
+LIBDIR = os.path.join(sys.path[0], 'lib')
+print(LIBDIR)
+fmod            = windll.LoadLibrary(LIBDIR + '\\fmod.dll')
 systemInit      = fmod.FSOUND_Init
 setOutput       = fmod.FSOUND_SetOutput
 setMasterVolume = fmod.FSOUND_SetSFXMasterVolume
