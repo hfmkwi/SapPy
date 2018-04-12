@@ -1,4 +1,4 @@
-from sappy.decoder import Decoder
+from sappy.player import Player
 import time
 import argparse
 
@@ -22,8 +22,7 @@ def main():
                   )
     args = p.parse_args()
 
-    # exit()
-    dec = Decoder()
+    dec = Player()
 
     print("Playing: ",
           args.path.split('\\')[-1], " Song number: ", args.song_num)

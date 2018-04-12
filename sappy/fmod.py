@@ -1,24 +1,18 @@
 #-*- coding: utf-8 -*-
 """API for FMOD. (Direct clone from original source)"""
 import ctypes
-from ctypes import POINTER, Structure, c_bool, c_float, c_int, c_uint, windll
-from enum import IntEnum, auto
-from typing import List, NamedTuple
-import sys
+import enum
 import os
+import sys
+import typing
 
-__all__ = ('FModErrors', 'FSoundModes', 'FSoundChannelSampleMode', 'get_err',
-           'get_err_str', 'systemInit', 'setVolume', 'getError', 'sampleLoad',
-           'setLoopPoints', 'playSound', 'stopSound', 'setPan', 'setVolume',
-           'setMasterVolume', 'setFrequency', 'systemClose', 'setOutput',
-           'enableFX', 'setEcho', 'setPaused', 'disableFX')
 # yapf: disable
 
 FMOD_VERSION = 3.75
 
 LIBDIR = os.path.join(sys.path[0], 'lib')
 print(LIBDIR)
-fmod            = windll.LoadLibrary(LIBDIR + '\\fmod.dll')
+fmod            = ctypes.windll.LoadLibrary(LIBDIR + '\\fmod.dll')
 systemInit      = fmod.FSOUND_Init
 setOutput       = fmod.FSOUND_SetOutput
 setMasterVolume = fmod.FSOUND_SetSFXMasterVolume
@@ -32,12 +26,11 @@ setPan          = fmod.FSOUND_SetPan
 setVolume       = fmod.FSOUND_SetVolume
 systemClose     = fmod.FSOUND_Close
 enableFX        = fmod.FSOUND_FX_Enable
-enableFX.argtypes = (c_int, c_uint)
 setEcho         = fmod.FSOUND_FX_SetEcho
 setPaused       = fmod.FSOUND_SetPaused
 disableFX       = fmod.FSOUND_FX_Disable
 
-class FModErrors(IntEnum):
+class FModErrors(enum.IntEnum):
     NONE           = 0
     BUSY           = 1
     UNINIT         = 2
@@ -60,7 +53,7 @@ class FModErrors(IntEnum):
     CD_DEVICE      = 19
 
 
-class FSoundModes(IntEnum):
+class FSoundModes(enum.IntEnum):
     LOOP_OFF      = 0x1
     LOOP_NORMAL   = 0x2
     LOOP_BIDI     = 0x4
@@ -95,7 +88,7 @@ class FSoundModes(IntEnum):
     NORMAL        = _16BITS | SIGNED | MONO
 
 
-class FSoundChannelSampleMode(IntEnum):
+class FSoundChannelSampleMode(enum.IntEnum):
     FREE          = -1
     UNMANAGED     = -2
     ALL           = -3
@@ -160,3 +153,6 @@ def get_err(errcode: int) -> str:
 
 def get_err_str() -> str:
     return get_err(fmod.FSOUND_GetError())
+
+
+del os, sys, typing

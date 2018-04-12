@@ -1,21 +1,80 @@
 #-*- coding: utf-8 -*-
 """Data-storage containers for internal use."""
-from collections import deque, UserDict
-from enum import IntEnum
-from typing import (Any, ItemsView, KeysView, MutableSequence, Union,
-                    ValuesView)
+import collections
+import enum
+import typing
 
 import sappy.fileio as fileio
 
-__all__ = ('ChannelTypes', 'DirectTypes', 'NoteTypes', 'NotePhases',
-           'Collection', 'ChannelQueue', 'DirectQueue', 'DrumKitQueue',
-           'EventQueue', 'InstrumentQueue', 'KeyMapQueue', 'NoteQueue',
-           'NoteIDQueue', 'SampleQueue', 'SubroutineQueue', 'Channel', 'Direct',
-           'DrumKit', 'Event', 'Instrument', 'KeyMap', 'Note', 'NoteID',
-           'Sample', 'Subroutine')
+NOTES = {
+    0: 'C',
+    1: '#C',
+    2: 'D',
+    3: '#D',
+    4: 'E',
+    5: 'F',
+    6: '#F',
+    7: 'G',
+    8: '#G',
+    9: 'A',
+    10: '#A',
+    11: 'B'
+}
+# yapf: enable
+STLEN = {
+    0x0: 0x0,
+    0x1: 0x1,
+    0x2: 0x2,
+    0x3: 0x3,
+    0x4: 0x4,
+    0x5: 0x5,
+    0x6: 0x6,
+    0x7: 0x7,
+    0x8: 0x8,
+    0x9: 0x9,
+    0xA: 0xA,
+    0xB: 0xB,
+    0xC: 0xC,
+    0xD: 0xD,
+    0xE: 0xE,
+    0xF: 0xF,
+    0x10: 0x10,
+    0x11: 0x11,
+    0x12: 0x12,
+    0x13: 0x13,
+    0x14: 0x14,
+    0x15: 0x15,
+    0x16: 0x16,
+    0x17: 0x17,
+    0x18: 0x18,
+    0x19: 0x1C,
+    0x1A: 0x1E,
+    0x1B: 0x20,
+    0x1C: 0x24,
+    0x1D: 0x28,
+    0x1E: 0x2A,
+    0x1F: 0x2C,
+    0x20: 0x30,
+    0x21: 0x34,
+    0x22: 0x36,
+    0x23: 0x38,
+    0x24: 0x3C,
+    0x25: 0x40,
+    0x26: 0x42,
+    0x27: 0x44,
+    0x28: 0x48,
+    0x29: 0x4C,
+    0x2A: 0x4E,
+    0x2B: 0x50,
+    0x2C: 0x54,
+    0x2D: 0x58,
+    0x2E: 0x5A,
+    0x2F: 0x5C,
+    0x30: 0x60
+}
 
 
-class ChannelTypes(IntEnum):
+class ChannelTypes(enum.IntEnum):
     """Possible output types for each sound channel"""
     # yapf: disable
     DIRECT  = 0
@@ -32,7 +91,7 @@ class ChannelTypes(IntEnum):
     # yapf: enable
 
 
-class DirectTypes(IntEnum):
+class DirectTypes(enum.IntEnum):
     """Possible outputs for DirectSound note."""
     # yapf: disable
     DIRECT  = 0
@@ -46,7 +105,7 @@ class DirectTypes(IntEnum):
     # yapf: enable
 
 
-class NoteTypes(IntEnum):
+class NoteTypes(enum.IntEnum):
     """Declare possible outputs for the Note object"""
     # yapf: disable
     DIRECT  = 0
@@ -60,7 +119,7 @@ class NoteTypes(IntEnum):
     # yapf: enable
 
 
-class NotePhases(IntEnum):
+class NotePhases(enum.IntEnum):
     """Declare possible phases for the Note object"""
     # yapf: disable
     INITIAL = 0
@@ -72,7 +131,8 @@ class NotePhases(IntEnum):
     # yapf: enable
 
 
-class Collection(deque, UserDict, MutableSequence):
+class Collection(collections.deque, collections.UserDict,
+                 typing.MutableSequence):
     """Imitation of the VB6 `Collection` data-container
 
     This container behaves similarly to both a list and a dictionary. An item
@@ -133,8 +193,8 @@ class Collection(deque, UserDict, MutableSequence):
     """
 
     def __init__(self, *iterables):
-        UserDict.__init__(self)
-        deque.__init__(self)
+        collections.UserDict.__init__(self)
+        collections.deque.__init__(self)
         if iterables:
             for iter in iterables:
                 if type(iter) == dict:
@@ -143,24 +203,24 @@ class Collection(deque, UserDict, MutableSequence):
                     continue
                 self.extend(iter)
 
-    def __contains__(self, item: Any) -> bool:
-        return deque.__contains__(self, item) or item in self.data
+    def __contains__(self, item: typing.Any) -> bool:
+        return collections.deque.__contains__(self, item) or item in self.data
 
     def __delitem__(self, item: int) -> bool:
-        out = deque.__getitem__(self, item)
-        deque.__delitem__(self, item)
+        out = collections.deque.__getitem__(self, item)
+        collections.deque.__delitem__(self, item)
         self.data.pop(out)
 
-    def __getitem__(self, key: Any) -> Any:
+    def __getitem__(self, key: typing.Any) -> typing.Any:
         out = self.data.get(key)
         if out is not None:
             return out
-        out = deque.__getitem__(self, key)
+        out = collections.deque.__getitem__(self, key)
         out = self.data.get(out, out)
         return out
 
     def __iter__(self):
-        self._list = tuple(deque.__iter__(self))
+        self._list = tuple(collections.deque.__iter__(self))
         self._ind = 0
         return self
 
@@ -173,20 +233,21 @@ class Collection(deque, UserDict, MutableSequence):
             raise StopIteration
 
     def __eq__(self, other: 'Container') -> bool:
-        return deque.__eq__(self, other) and self.data == other.data
+        return collections.deque.__eq__(self, other) and self.data == other.data
 
     def __hash__(self):
-        return hash((deque.__iter__(self), tuple(self.data)))
+        return hash((collections.deque.__iter__(self), tuple(self.data)))
 
     def __ne__(self, other: 'Container') -> bool:
-        return deque.__ne__(self, other) and self.data != other.data
+        return collections.deque.__ne__(self, other) and self.data != other.data
 
-    def __setitem__(self, key: Union[str, int], item: Any) -> None:
+    def __setitem__(self, key: typing.Union[str, int],
+                    item: typing.Any) -> None:
         if type(key) == str:
             self.data[key] = item
         elif type(key) == int:
-            out = deque.__getitem__(self, key)
-            deque.__setitem__(self, key, item)
+            out = collections.deque.__getitem__(self, key)
+            collections.deque.__setitem__(self, key, item)
             if out in self.data:
                 self.data[out] = item
 
@@ -205,7 +266,7 @@ class Collection(deque, UserDict, MutableSequence):
 
     def clear(self):
         """Clear all of storage and the keystore."""
-        deque.clear(self)
+        collections.deque.clear(self)
         self.data.clear()
         assert len(self) == 0
         assert len(self.data) == 0
@@ -214,7 +275,7 @@ class Collection(deque, UserDict, MutableSequence):
         """Get value from key or index"""
         return self.data[key]
 
-    def key_append(self, item: Any, key: Any) -> None:
+    def key_append(self, item: typing.Any, key: typing.Any) -> None:
         """Append an item to end of storage.
 
         Args:
@@ -226,7 +287,7 @@ class Collection(deque, UserDict, MutableSequence):
         self.data[key] = item
         self.append(key)
 
-    def key_insert(self, item: Any, key: Any, ind: int = None):
+    def key_insert(self, item: typing.Any, key: typing.Any, ind: int = None):
         """Insert an item at the specified index within storage."""
         if key in self.data:
             raise KeyError('Key in use.')
@@ -234,11 +295,11 @@ class Collection(deque, UserDict, MutableSequence):
         self.insert(ind, key)
 
     def remove(self, key: str):
-        ind = deque.index(self, key)
-        deque.__delitem__(self, ind)
+        ind = collections.deque.index(self, key)
+        collections.deque.__delitem__(self, ind)
         del self.data[key]
 
-    count = property(fget=deque.__len__)
+    count = property(fget=collections.deque.__len__)
 
 
 class ChannelQueue(Collection):
@@ -532,7 +593,7 @@ class NoteID(Type):
 class Sample(Type):
     """Sound sample for use during playback."""
 
-    class SampleDataBytes(MutableSequence):
+    class SampleDataBytes(typing.MutableSequence):
         """Holds sample data as extracted from ROM."""
 
         def __init__(self, data: bytearray = None) -> None:
@@ -565,11 +626,11 @@ class Sample(Type):
                 self._storage.extend([0])
             self._storage[index] = value
 
-        def append(self, value: Any) -> None:
+        def append(self, value: typing.Any) -> None:
             """Append item to storage."""
             self._storage.append(value)
 
-        def insert(self, index: int, value: Any) -> None:
+        def insert(self, index: int, value: typing.Any) -> None:
             """Insert item at specified index."""
             self._storage.insert(index, value)
 
@@ -614,3 +675,40 @@ class Subroutine(Type):
         self.evt_q_ptr: int = evt_q_ptr
         self.key:       str = key
     # yapf: enable
+
+
+def sbyte_to_int(sbyte: int) -> int:
+    """Convert a signed byte into a signed 4-byte integer."""
+    return sbyte - 0x100 if sbyte >= 0x80 else sbyte
+
+
+def stlen_to_ticks(short_len: int) -> int:
+    """Convert short length to MIDI ticks."""
+    return STLEN.get(short_len)
+
+
+def note_to_name(midi_note: int) -> str:
+    """Retrieve the string name of a MIDI note from its byte representation."""
+    x = midi_note % 12
+    o = midi_note // 12
+    return NOTES.get(x) + str(o)
+
+
+def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
+    """Retrieve the sound frequency of a MIDI note relative to C3."""
+    import math
+    magic = math.pow(2, 1.0 / 12.0)
+    X = midi_note - 0x3C
+    if midc_freq == -1:
+        a = 7040
+        c = a * math.pow(magic, 3)
+    elif midc_freq == -2:
+        a = 7040 / 2
+        c = a * math.pow(magic, 3)
+    else:
+        c = midc_freq
+        #print(c)
+
+    x = c * math.pow(magic, X)
+    #print(note_to_name(midi_note), x)
+    return int(x)
