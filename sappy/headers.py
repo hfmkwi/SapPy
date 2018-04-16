@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-"""Player types"""
+"""Player types."""
 import typing
 
 import sappy.fileio as fileio
@@ -7,19 +7,21 @@ import sappy.fileio as fileio
 
 class DirectHeader(typing.NamedTuple):
     """Data for a DirectSound instrument."""
+
     # yapf: disable
     b0:       int = int()
     b1:       int = int()
     smp_head: int = int()
     attack:   int = int()
     hold:     int = int()
-    sustain:  int = int()
+    is_sustain:  int = int()
     release:  int = int()
     # yapf: enable
 
 
 class DrumKitHeader(typing.NamedTuple):
     """Data for a Drumkit instrument."""
+
     # yapf: disable
     b0:      int = int()
     b1:      int = int()
@@ -33,6 +35,7 @@ class DrumKitHeader(typing.NamedTuple):
 
 class InstrumentHeader(typing.NamedTuple):
     """Data for a standard instrument."""
+
     # yapf: disable
     channel:    int = int()
     drum_pitch: int = int()
@@ -41,6 +44,7 @@ class InstrumentHeader(typing.NamedTuple):
 
 class InvalidHeader(typing.NamedTuple):
     """Data for an invalid data."""
+
     b0: int = int()
     b1: int = int()
     b2: int = int()
@@ -55,6 +59,7 @@ class InvalidHeader(typing.NamedTuple):
 
 class MasterTableEntry(typing.NamedTuple):
     """Song entry as read from ROM."""
+
     # yapf: disable
     song: int = int()
     pri1: int = int()
@@ -64,6 +69,7 @@ class MasterTableEntry(typing.NamedTuple):
 
 class MultiHeader(typing.NamedTuple):
     """Data for MultiSample instrument."""
+
     # yapf: disable
     b0:      int = int()
     b1:      int = int()
@@ -74,6 +80,7 @@ class MultiHeader(typing.NamedTuple):
 
 class NoiseHeader(typing.NamedTuple):
     """Data for simulated AGB noise."""
+
     # yapf: disable
     b0:      int = int()
     b1:      int = int()
@@ -83,18 +90,19 @@ class NoiseHeader(typing.NamedTuple):
     b5:      int = int()
     attack:  int = int()
     decay:   int = int()
-    sustain: int = int()
+    is_sustain: int = int()
     release: int = int()
     # yapf: enable
 
 
 class SampleHeader(typing.NamedTuple):
     """Data for an AGB sound sample."""
+
     # yapf: disable
     flags:     int = int()
     b4:        int = int()
     fine_tune: int = int()
-    freq:      int = int()
+    frequency:      int = int()
     loop:      int = int()
     size:      int = int()
     # yapf: enable
@@ -102,6 +110,7 @@ class SampleHeader(typing.NamedTuple):
 
 class SongHeader(typing.NamedTuple):
     """Data for an AGB song."""
+
     # yapf: disable
     tracks:    int = int()
     blks:      int = int()
@@ -113,6 +122,7 @@ class SongHeader(typing.NamedTuple):
 
 class SquareOneHeader(typing.NamedTuple):
     """Data for a Square1 instrument."""
+
     # yapf: disable
     raw1:       int = int()
     raw2:       int = int()
@@ -122,13 +132,14 @@ class SquareOneHeader(typing.NamedTuple):
     b5:         int = int()
     attack:     int = int()
     decay:      int = int()
-    sustain:    int = int()
+    is_sustain:    int = int()
     release:    int = int()
     # yapf: enable
 
 
 class SquareTwoHeader(typing.NamedTuple):
     """Data for a Square2 instrument."""
+
     # yapf: disable
     b0:         int = int()
     b1:         int = int()
@@ -138,20 +149,21 @@ class SquareTwoHeader(typing.NamedTuple):
     b5:         int = int()
     attack:     int = int()
     decay:      int = int()
-    sustain:    int = int()
+    is_sustain:    int = int()
     release:    int = int()
     # yapf: enable
 
 
 class WaveHeader(typing.NamedTuple):
     """Data for a Wave instrument."""
+
     # yapf: disable
     b0:      int = int()
     b1:      int = int()
     sample:  int = int()
     attack:  int = int()
     decay:   int = int()
-    sustain: int = int()
+    is_sustain: int = int()
     release: int = int()
     # yapf: enable
 
@@ -167,7 +179,7 @@ def rd_dct_head(file_id: int, addr: int = None) -> DirectHeader:
         smp_head = w_file.rd_ltendian(4),
         attack   = w_file.rd_byte(),
         hold     = w_file.rd_byte(),
-        sustain  = w_file.rd_byte(),
+        is_sustain  = w_file.rd_byte(),
         release  = w_file.rd_byte()
     )
     # yapf: enable
@@ -240,7 +252,7 @@ def rd_nse_head(file_id: int, addr: int = None) -> NoiseHeader:
         b5      = w_file.rd_byte(),
         attack  = w_file.rd_byte(),
         decay   = w_file.rd_byte(),
-        sustain = w_file.rd_byte(),
+        is_sustain = w_file.rd_byte(),
         release = w_file.rd_byte()
     )
     # yapf: enable
@@ -271,7 +283,7 @@ def rd_smp_head(file_id: int, addr: int = None) -> SampleHeader:
         flags     = w_file.rd_ltendian(4),
         b4        = w_file.rd_byte(),
         fine_tune = w_file.rd_byte(),
-        freq      = w_file.rd_ltendian(2),
+        frequency      = w_file.rd_ltendian(2),
         loop      = w_file.rd_ltendian(4),
         size      = w_file.rd_ltendian(4)
     )
@@ -309,7 +321,7 @@ def rd_sq1_head(file_id: int, addr: int = None) -> SquareOneHeader:
         b5         = w_file.rd_byte(),
         attack     = w_file.rd_byte(),
         decay      = w_file.rd_byte(),
-        sustain    = w_file.rd_byte(),
+        is_sustain    = w_file.rd_byte(),
         release    = w_file.rd_byte()
     )
     # yapf: enable
@@ -330,7 +342,7 @@ def rd_sq2_head(file_id: int, addr: int = None) -> SquareTwoHeader:
         b5         = w_file.rd_byte(),
         attack     = w_file.rd_byte(),
         decay      = w_file.rd_byte(),
-        sustain    = w_file.rd_byte(),
+        is_sustain    = w_file.rd_byte(),
         release    = w_file.rd_byte()
     )
     # yapf: enable
@@ -348,7 +360,7 @@ def rd_wav_head(file_id: int, addr: int = None) -> WaveHeader:
         sample  = w_file.rd_ltendian(4),
         attack  = w_file.rd_byte(),
         decay   = w_file.rd_byte(),
-        sustain = w_file.rd_byte(),
+        is_sustain = w_file.rd_byte(),
         release = w_file.rd_byte()
     )
     # yapf: enable

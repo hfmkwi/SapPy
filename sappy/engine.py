@@ -20,7 +20,7 @@ NOTES = {
     10: '#A',
     11: 'B'
 }
-# yapf: enable
+
 STLEN = {
     0x0: 0x0,
     0x1: 0x1,
@@ -75,7 +75,8 @@ STLEN = {
 
 
 class ChannelTypes(enum.IntEnum):
-    """Possible output types for each sound channel"""
+    """Possible output types for each sound channel."""
+
     # yapf: disable
     DIRECT  = 0
     SQUARE1 = 1
@@ -94,34 +95,37 @@ class ChannelTypes(enum.IntEnum):
 class DirectTypes(enum.IntEnum):
     """Possible outputs for DirectSound note."""
     # yapf: disable
-    DIRECT  = 0
-    SQUARE1 = 1
-    SQUARE2 = 2
-    WAVE    = 3
-    NOISE   = 4
-    UNK5    = 5
-    UNK6    = 6
-    UNK7    = 7
+
+    DIRECT   = 0
+    SQUARE1  = 1
+    SQUARE2  = 2
+    WAVEFORM = 3
+    NOISE    = 4
+    UNK5     = 5
+    UNK6     = 6
+    UNK7     = 7
     # yapf: enable
 
 
 class NoteTypes(enum.IntEnum):
-    """Declare possible outputs for the Note object"""
+    """Declare possible outputs for the Note object."""
     # yapf: disable
-    DIRECT  = 0
-    SQUARE1 = 1
-    SQUARE2 = 2
-    WAVE    = 3
-    NOISE   = 4
-    UNK5    = 5
-    UNK6    = 6
-    UNK7    = 7
+
+    DIRECT   = 0
+    SQUARE1  = 1
+    SQUARE2  = 2
+    WAVEFORM = 3
+    NOISE    = 4
+    UNK5     = 5
+    UNK6     = 6
+    UNK7     = 7
     # yapf: enable
 
 
 class NotePhases(enum.IntEnum):
-    """Declare possible phases for the Note object"""
+    """Declare possible phases for the Note object."""
     # yapf: disable
+
     INITIAL = 0
     ATTACK  = 1
     DECAY   = 2
@@ -133,7 +137,7 @@ class NotePhases(enum.IntEnum):
 
 class Collection(collections.deque, collections.UserDict,
                  typing.MutableSequence):
-    """Imitation of the VB6 `Collection` data-container
+    """Imitation of the VB6 `Collection` data-container.
 
     This container behaves similarly to both a list and a dictionary. An item
     may be appended or inserted with or without a key. If an item is added with
@@ -193,6 +197,7 @@ class Collection(collections.deque, collections.UserDict,
     """
 
     def __init__(self, *iterables):
+        """Initialize and populate the keystore and deque."""
         collections.UserDict.__init__(self)
         collections.deque.__init__(self)
         if iterables:
@@ -261,22 +266,20 @@ class Collection(collections.deque, collections.UserDict,
         return str(tuple(self))
 
     def add(self, *args):
-        """Abstract add method; add some container to a container queue"""
         raise NotImplementedError
 
     def clear(self):
-        """Clear all of storage and the keystore."""
         collections.deque.clear(self)
         self.data.clear()
         assert len(self) == 0
         assert len(self.data) == 0
 
     def item(self, key: str):
-        """Get value from key or index"""
+        """Get value from key or index."""
         return self.data[key]
 
     def key_append(self, item: typing.Any, key: typing.Any) -> None:
-        """Append an item to end of storage.
+        """Append an keyed item to end of storage.
 
         Args:
         key: A string reference to the item's index.
@@ -432,34 +435,34 @@ class Channel(Type):
 
     # yapf: disable
     def __init__(self):
-        self.playing:      list            = []
-        self.in_sub:       bool            = False
-        self.enable:       bool            = True
-        self.mute:         bool            = False
-        self.sustain:      bool            = False
-        self.wait_ticks:   float           = -1.0
-        self.loop_ptr:     int             = 0
-        self.main_vol:     int             = 100
-        self.panning:      int             = 0x40
-        self.patch_num:    int             = 0x00
-        self.pitch_bend:   int             = 0x40
-        self.pitch_range:  int             = 2
-        self.pgm_ctr:      int             = 0
-        self.priority:     int             = 0
-        self.rtn_ptr:      int             = 0
-        self.sub_ctr:      int             = 0
-        self.sub_loop_cnt: int             = 1
-        self.track_len:    int             = 0
-        self.track_ptr:    int             = 0
-        self.transpose:    int             = 0
-        self.vib_depth:    int             = 0
-        self.vib_rate:     int             = 0
-        self.volume:       int             = 0
-        self.key:          str             = ''
-        self.output:       ChannelTypes    = ChannelTypes.DIRECT
-        self.evt_queue:    EventQueue      = EventQueue()
-        self.notes:        NoteIDQueue     = NoteIDQueue()
-        self.subs:         SubroutineQueue = SubroutineQueue()
+        self.is_enabled:          bool            = True
+        self.is_muted:            bool            = False
+        self.in_subroutine:       bool            = False
+        self.is_sustain:          bool            = False
+        self.wait_ticks:          float           = -1.0
+        self.loop_ptr:            int             = 0
+        self.main_volume:         int             = 100
+        self.panning:             int             = 0x40
+        self.patch_num:           int             = 0x00
+        self.pitch_bend:          int             = 0x40
+        self.pitch_range:         int             = 2
+        self.program_ctr:         int             = 0
+        self.priority:            int             = 0
+        self.return_ptr:          int             = 0
+        self.subroutine_ctr:      int             = 0
+        self.subroutine_loop_cnt: int             = 1
+        self.track_len:           int             = 0
+        self.track_ptr:           int             = 0
+        self.transpose:           int             = 0
+        self.vib_depth:           int             = 0
+        self.vib_rate:            int             = 0
+        self.output_volume:       int             = 0
+        self.notes_playing:       list            = []
+        self.key:                 str             = ''
+        self.output_type:         ChannelTypes    = ChannelTypes.DIRECT
+        self.event_queue:         EventQueue      = EventQueue()
+        self.notes:               NoteIDQueue     = NoteIDQueue()
+        self.subroutines:         SubroutineQueue = SubroutineQueue()
     # yapf: enable
 
 
@@ -502,7 +505,7 @@ class DrumKit(Type):
 
 
 class Event(Type):
-    """Internal event"""
+    """Internal event."""
     __slots__ = ('cmd_byte', 'arg1', 'arg2', 'arg3', 'ticks')
 
     # yapf: disable
@@ -542,7 +545,7 @@ class Note(Type):
     """Container representing a single note in the AGB sound engine."""
     __slots__ = ('enable', 'note_off', 'env_dest', 'env_pos', 'env_step',
                  'vib_pos', 'wait_ticks', 'env_attn', 'env_dcy', 'env_rel',
-                 'env_sus', 'fmod_channel', 'freq', 'note_num', 'parent',
+                 'env_sus', 'fmod_channel', 'frequency', 'note_num', 'parent',
                  'patch_num', 'unk_val', 'velocity', 'key', 'smp_id', 'output',
                  'phase', 'fmod_fx')
 
@@ -561,7 +564,7 @@ class Note(Type):
         self.env_sus:      int        = 0
         self.fmod_channel: int        = 0
         self.fmod_fx:      int        = 0
-        self.freq:         int        = 0
+        self.frequency:    int        = 0
         self.note_num:     int        = note_num
         self.parent:       int        = parent
         self.patch_num:    int        = patch_num
@@ -572,11 +575,6 @@ class Note(Type):
         self.output:       NoteTypes  = NoteTypes.DIRECT
         self.phase:        NotePhases = NotePhases.INITIAL
     # yapf: enable
-
-    def reset(self):
-        self.note_off = True
-        self.wait_ticks = 0
-        self.vib_pos = 0.0
 
 
 class NoteID(Type):
@@ -640,7 +638,7 @@ class Sample(Type):
         self.loop:       bool      = False
         self.smp_data_b: bytearray = self.SampleDataBytes()
         self.fmod_smp:   int       = 0
-        self.freq:       int       = 0
+        self.frequency:  int       = 0
         self.loop_start: int       = 0
         self.size:       int       = 0
         self.key:        str       = key
@@ -649,7 +647,7 @@ class Sample(Type):
 
     @property
     def smp_data_len(self):
-        """Number of int in sample"""
+        """Return the size of the sample data in bytes."""
         return len(self.smp_data_b)
 
     def rd_smp_data(self, id: int, t_size: int):
@@ -695,7 +693,7 @@ def note_to_name(midi_note: int) -> str:
 
 
 def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
-    """Retrieve the sound frequency of a MIDI note relative to C3."""
+    """Retrieve the sound frequency in Hz of a MIDI note relative to C3."""
     import math
     magic = math.pow(2, 1.0 / 12.0)
     X = midi_note - 0x3C
@@ -707,8 +705,6 @@ def note_to_freq(midi_note: int, midc_freq: int = -1) -> int:
         c = a * math.pow(magic, 3)
     else:
         c = midc_freq
-        #print(c)
 
     x = c * math.pow(magic, X)
-    #print(note_to_name(midi_note), x)
     return int(x)

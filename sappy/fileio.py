@@ -1,7 +1,7 @@
 #!/usr/bin/python3
 #-*- coding: utf-8 -*-
 # pylint: disable=C0103,C0123,W0212,W0622
-"""Provides File IO for Sappy"""
+"""Provides File IO for Sappy."""
 import struct
 from os.path import (exists, getsize, isabs, isfile)
 
@@ -9,37 +9,45 @@ __all__ = ('Error', 'VirtualFile', 'open_file', 'open_new_file')
 
 
 class Error(Exception):
-    """Module-level base exception"""
+    """Module-level base exception."""
 
     def __init__(self, msg: str, code: int) -> None:
-        """Initate an exception with a message and err code"""
+        """Init an exception with a message and error code."""
         super().__init__()
         self.msg = msg
         self.code = code
 
 
 class VirtualFile(object):  # pylint: disable=R0902
-    """Base file object """
+    """Base file object."""
 
     _ftable = {}
 
     def __init__(self, path: str = None, id: int = None) -> None:
-        """Initate a file object with basic IO functions
+        """Init a file object with basic IO functions.
 
-        Args:
-            path: refers to an existing file; otherwise refers to a new
-                file
-            id: ID number of the file for internal identification
+        Parameters
+        ----------
+        path
+            absolute file path to an existing file
+        id
+            file ID number
 
-        Attributes:
-            _ftable (dict): A table holding references to all open files
-                stored under their respective IDs.
-            id (int): file number for developer identification.
-            file (IOWrapper): root file object used for read/write
-                operations.
-            path (str): file path of the file intended for access.
-            rd_addr (int): offset of the read head
-            wr_addr (int): offset of the write head
+        Attributes
+        ----------
+        _ftable
+            A table holding references to all open files stored under
+            their respective IDs.
+        id
+            file number for API identification.
+        file
+            root file object used for read/write operations.
+        path
+            file path of the file intended for access.
+        rd_addr
+            offset of the read head
+        wr_addr
+            offset of the write head
 
         """
         self._path = path  # Set file name for local access
@@ -60,27 +68,29 @@ class VirtualFile(object):  # pylint: disable=R0902
         self._wr_addr = self._rd_addr = 0
 
     def __enter__(self):
+        """Create a temporary VirtualFile."""
         self.wr_addr = 0
         self.rd_addr = 0
         self._file = open(self.path, 'rb+')
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
+        """Destroy the temporary VirtualFile."""
         self.close()
 
     @property
     def path(self) -> str:
-        """File path to the file"""
+        """Return the file path."""
         return self._path
 
     @property
     def id(self) -> int:
-        """File ID number for internal identification"""
+        """Return the file ID."""
         return self._id
 
     @property
     def rd_addr(self) -> int:
-        """Current offset of the read head"""
+        """Return the address of the read head."""
         return self._rd_addr
 
     @rd_addr.setter
@@ -92,12 +102,12 @@ class VirtualFile(object):  # pylint: disable=R0902
 
     @property
     def size(self):
-        """Number of int in file"""
+        """Return size of the file in bytes."""
         return getsize(self.path)
 
     @property
     def wr_addr(self) -> int:
-        """Current offset of the write head"""
+        """Return the address of the write head."""
         return self._wr_addr
 
     @wr_addr.setter
@@ -107,7 +117,7 @@ class VirtualFile(object):  # pylint: disable=R0902
 
     @staticmethod
     def gba_ptr_to_addr(ptr: int) -> int:
-        """Convert an AGB rom pointer to an integer
+        """Convert an AGB rom pointer to an integer.
 
         An AGB rom pointer is a 4 byte stream in little-endian format in the
         following format:
@@ -131,7 +141,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return __class__._ftable.get(id)
 
     def _chk_id(self, id: int) -> bool:
-        """Check if the specified file ID is valid and unused
+        """Check if the specified file ID is valid and unused.
 
         Args:
             file_id: file ID to check
@@ -146,7 +156,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return id not in self._ftable and type(id) == int
 
     def _chk_path(self) -> bool:
-        """Check if a file path refers to an existing file and not a directory
+        """Check if a file path refers to an existing file and not a directory.
 
         Returns:
             True if successful, False otherwise.
@@ -156,7 +166,8 @@ class VirtualFile(object):  # pylint: disable=R0902
         return exists(path) and isfile(path) and isabs(path)
 
     def _close(self) -> None:
-        """Close a file by ID
+        """Close a file by ID.
+
         Deletes the reference in the file table and frees the ID for use
 
         Args:
@@ -168,7 +179,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         del self
 
     def _get(self, addr: int = None) -> int:
-        """Imitation of the VB6 `Get` keyword in binary mode
+        """Imitation of the VB6 `Get` keyword in binary mode.
 
         Args:
             offset: position to move the read head to
@@ -185,7 +196,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return byte
 
     def _get_free_id(self) -> int:
-        """Return a free file id (internal use only)
+        """Return a free file id (internal use only).
 
         Returns:
             A number (0<=n<256) representing a free file on success
@@ -201,7 +212,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         raise Error(msg='all files are currently in use', code=1)
 
     def _put(self, data: int, addr: int = None) -> None:
-        """Imitation of the VB6 `Put` keyword in binary mode
+        """Imitation of the VB6 `Put` keyword in binary mode.
 
         Args:
             data: data to be written to file
@@ -216,8 +227,8 @@ class VirtualFile(object):  # pylint: disable=R0902
         self._file.write(data)
         self.wr_addr = self._file.tell()
 
-    def close(self, id: int = None) -> None:  # pylint: disable=W0622
-        """Close the current file
+    def close(self, id: int = None) -> None:
+        """Close the current file.
 
         Args:
             id: a valid file ID
@@ -234,7 +245,7 @@ class VirtualFile(object):  # pylint: disable=R0902
     wr_byte = _put
 
     def wr_bgendian(self, width: int, data: int, addr: int = None) -> None:
-        """Write an integer as int in big-endian format to file
+        """Write an integer as int in big-endian format to file.
 
         Args:
             width: maximum size of data in int form
@@ -249,7 +260,7 @@ class VirtualFile(object):  # pylint: disable=R0902
             self.wr_byte(byte)
 
     def wr_ltendian(self, width: int, data: int, addr: int = None) -> None:
-        """Write an integer as int in little-endian format to file
+        """Write an integer as int in little-endian format to file.
 
         Args:
             width: maximum byte width of the data
@@ -264,7 +275,7 @@ class VirtualFile(object):  # pylint: disable=R0902
             self.wr_byte(byte)
 
     def wr_str(self, data: str, addr: int = None) -> None:
-        """Write a string as int to file
+        """Write a string as int to file.
 
         Args:
             data: data to write to file
@@ -277,7 +288,7 @@ class VirtualFile(object):  # pylint: disable=R0902
             self.wr_byte(char)
 
     def rd_byte(self, addr: int = None) -> int:
-        """Read a byte from file
+        """Read a byte from file.
 
         Args:
             addr: a valid address in the file at which to move the read head
@@ -290,7 +301,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return self._get(addr)
 
     def rd_vlq(self, addr: int = None) -> int:
-        """Read a stream of int in VLQ format
+        """Read a stream of int in VLQ format.
 
         Args:
             addr: a valid address in the file at which to move the read head
@@ -298,6 +309,7 @@ class VirtualFile(object):  # pylint: disable=R0902
 
         Returns:
             an integer
+
         """
         self.rd_addr = addr
         vlq = 0
@@ -311,7 +323,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return vlq
 
     def rd_bgendian(self, width: int, addr: int = None) -> int:
-        """Read a stream of int in big-endian format
+        """Read a stream of int in big-endian format.
 
         Args:
             width: number of consecutive int to read
@@ -320,6 +332,7 @@ class VirtualFile(object):  # pylint: disable=R0902
 
         Returns:
             An integer
+
         """
         self.rd_addr = addr
         out = 0
@@ -328,7 +341,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return out
 
     def rd_ltendian(self, width: int, addr: int = None) -> int:
-        """Read a stream of int in little-endian format
+        """Read a stream of int in little-endian format.
 
         Args:
             width: number of consective int to read
@@ -337,6 +350,7 @@ class VirtualFile(object):  # pylint: disable=R0902
 
         Returns:
             An integer
+
         """
         self.rd_addr = addr
         out = 0
@@ -345,7 +359,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         return out
 
     def rd_str(self, length: int, addr: int = None) -> str:
-        """Read a stream of int as a string from file
+        """Read a stream of int as a string from file.
 
         Args:
             len: number of consecutive int to read
@@ -354,6 +368,7 @@ class VirtualFile(object):  # pylint: disable=R0902
 
         Returns:
             A string of the specified length
+
         """
         self.rd_addr = addr
         out = []
@@ -381,12 +396,12 @@ class VirtualFile(object):  # pylint: disable=R0902
 
 
 def open_file(file_path: str, file_id: int = None) -> VirtualFile:
-    """Open an existing file with read/write access in byte mode"""
+    """Open an existing file with read/write access in byte mode."""
     return VirtualFile(file_path, file_id)
 
 
 def open_new_file(file_path: str, file_id: int = None) -> VirtualFile:
-    """Create a new file and open with read/write access in byte mode"""
+    """Create a new file and open with read/write access in byte mode."""
     with open(file_path, 'wb+') as file:
         file.write(bytes(1))
     return open_file(file_path, file_id)

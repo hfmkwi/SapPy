@@ -1,5 +1,5 @@
 #-*- coding: utf-8 -*-
-"""API for FMOD. (Direct clone from original source)"""
+"""API for FMOD (Direct clone from original source)."""
 import ctypes
 import enum
 import os
@@ -11,26 +11,30 @@ import typing
 FMOD_VERSION = 3.75
 
 LIBDIR = os.path.join(sys.path[0], 'lib')
-print(LIBDIR)
-fmod            = ctypes.windll.LoadLibrary(LIBDIR + '\\fmod.dll')
-systemInit      = fmod.FSOUND_Init
-setOutput       = fmod.FSOUND_SetOutput
-setMasterVolume = fmod.FSOUND_SetSFXMasterVolume
-getError        = fmod.FSOUND_GetError
-sampleLoad      = fmod.FSOUND_Sample_Load
-setLoopPoints   = fmod.FSOUND_Sample_SetLoopPoints
-playSound       = fmod.FSOUND_PlaySoundEx
-stopSound       = fmod.FSOUND_StopSound
-setFrequency    = fmod.FSOUND_SetFrequency
-setPan          = fmod.FSOUND_SetPan
-setVolume       = fmod.FSOUND_SetVolume
-systemClose     = fmod.FSOUND_Close
-enableFX        = fmod.FSOUND_FX_Enable
-setEcho         = fmod.FSOUND_FX_SetEcho
-setPaused       = fmod.FSOUND_SetPaused
-disableFX       = fmod.FSOUND_FX_Disable
+fmod              = ctypes.windll.LoadLibrary(LIBDIR + '\\fmod.dll')
+systemInit        = fmod.FSOUND_Init
+setOutput         = fmod.FSOUND_SetOutput
+setMasterVolume   = fmod.FSOUND_SetSFXMasterVolume
+getError          = fmod.FSOUND_GetError
+sampleLoad        = fmod.FSOUND_Sample_Load
+setLoopPoints     = fmod.FSOUND_Sample_SetLoopPoints
+playSound         = fmod.FSOUND_PlaySoundEx
+playSound.argtypes= (ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p, ctypes.c_char)
+stopSound         = fmod.FSOUND_StopSound
+setFrequency      = fmod.FSOUND_SetFrequency
+setPan            = fmod.FSOUND_SetPan
+setVolume         = fmod.FSOUND_SetVolume
+systemClose       = fmod.FSOUND_Close
+enableFX          = fmod.FSOUND_FX_Enable
+enableFX.argtypes = (ctypes.c_int, ctypes.c_uint)
+setEcho           = fmod.FSOUND_FX_SetEcho
+setEcho.argtypes  = (ctypes.c_int, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_float, ctypes.c_int)
+setPaused         = fmod.FSOUND_SetPaused
+disableFX         = fmod.FSOUND_FX_Disable
 
 class FModErrors(enum.IntEnum):
+    """Error codes in the FMOD API."""
+
     NONE           = 0
     BUSY           = 1
     UNINIT         = 2
@@ -54,6 +58,8 @@ class FModErrors(enum.IntEnum):
 
 
 class FSoundModes(enum.IntEnum):
+    """Sound flags for the FMOD API."""
+
     LOOP_OFF      = 0x1
     LOOP_NORMAL   = 0x2
     LOOP_BIDI     = 0x4
@@ -89,6 +95,8 @@ class FSoundModes(enum.IntEnum):
 
 
 class FSoundChannelSampleMode(enum.IntEnum):
+    """Misc. flags for the FMOD API."""
+
     FREE          = -1
     UNMANAGED     = -2
     ALL           = -3
@@ -142,17 +150,5 @@ FMOD_ERR_MESSAGES = {
     e.CD_DEVICE:
     "An error occured trying to open the specified CD device."
 }
-
-
-def get_err(errcode: int) -> str:
-    msg = FMOD_ERR_MESSAGES.get(FModErrors(errcode))
-    if not msg:
-        msg = "Unknown error"
-    return msg
-
-
-def get_err_str() -> str:
-    return get_err(fmod.FSOUND_GetError())
-
 
 del os, sys, typing

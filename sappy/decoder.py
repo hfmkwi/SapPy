@@ -20,6 +20,8 @@ gba_ptr_to_addr = fileio.VirtualFile.gba_ptr_to_addr
 
 
 class MetaData(typing.NamedTuple):
+    """Meta-data for a ROM."""
+
     rom_name: str
     rom_code: str
     tracks: int
@@ -27,30 +29,30 @@ class MetaData(typing.NamedTuple):
     priority: int
     header_ptr: int
     voice_ptr: int
+    unknown: int
 
     @property
-    def enable_echo(self):
+    def echo_enabled(self):
+        """Echo flag."""
         return bin(self.echo).lstrip('0b')[0] == 1
 
 
 class Decoder(object):
     """Decoder/interpreter for Sappy code."""
+
     DEBUG = False
-    GB_WAV_MULTI = 0.5
-    GB_WAV_BASE_FREQ = 880
-    GB_NSE_MULTI = 0.5
+    GB_WAV_MULTI = 0.5 # 0.0 - 1.0
+    GB_WAV_BASE_FREQ = 880 # Frequency in Hertz
+    GB_NSE_MULTI = 0.5 # 0.0 - 1.0
 
     if DEBUG:
         logging.basicConfig(level=DEBUG)
     log = logging.getLogger(name=__name__)
 
     def __init__(self):
+        """Initialize all data containers for relevant channel and sample data."""
         # yapf: disable
-        self.looped:      bool                                      = False
-        self.transpose:   int                                       = 0
         self.fpath:       str                                       = ''
-        self.note_arr:    typing.List                               = [engine.Note(*[0]*6)] * 32
-        self.noise_wavs:  typing.List[typing.List[str]]             = [[[] for i in range(10)] for i in range(2)]
         self.channels:    engine.ChannelQueue[engine.Channel]       = engine.ChannelQueue()
         self.directs:     engine.DirectQueue[engine.Direct]         = engine.DirectQueue()
         self.drumkits:    engine.DrumKitQueue[engine.DrumKit]       = engine.DrumKitQueue()
@@ -60,38 +62,38 @@ class Decoder(object):
         self.file:        fileio.VirtualFile                        = None
         # yapf:        enable
 
-    def dct_exists(self, dcts: engine.DirectQueue, dct_id: int) -> bool:
-        """Check if a direct exists in a specfied `engine.DirectQueue`."""
-        for dct in dcts:
-            dct: engine.Direct
-            if dct.key == str(dct_id):
+    def dct_exists(self, direct_queue: engine.DirectQueue, id: int) -> bool:
+        """Check if a direct exists for the specified ID."""
+        for direct in direct_queue:
+            direct: engine.Direct
+            if direct.key == str(id):
                 return True
         return False
 
-    def kmap_exists(self, kmaps: engine.KeyMapQueue, kmap_id: int) -> bool:
-        """Check if a keymap is defined."""
-        for kmap in kmaps:
-            if kmap.key == str(kmap_id):
+    def kmap_exists(self, keymap_queue: engine.KeyMapQueue, id: int) -> bool:
+        """Check if a keymap exists for the specified ID."""
+        for kmap in keymap_queue:
+            if kmap.key == str(id):
                 return True
         return False
 
-    def patch_exists(self, last_patch: int) -> bool:
-        """Check if an instrument is defined."""
-        for dct in self.directs:
-            if dct.key == str(last_patch):
+    def patch_exists(self, id: int) -> bool:
+        """Check if a ."""
+        for direct in self.directs:
+            if direct.key == str(id):
                 return True
-        for inst in self.insts:
-            if inst.key == str(last_patch):
+        for instrument in self.insts:
+            if instrument.key == str(id):
                 return True
-        for dk in self.drumkits:
-            if dk.key == str(last_patch):
+        for drumkit in self.drumkits:
+            if drumkit.key == str(id):
                 return True
         return False
 
-    def smp_exists(self, smp_id: int) -> bool:
-        """Check if a sample exists in the available sample pool."""
-        for smp in self.samples:
-            if smp.key == str(smp_id):
+    def smp_exists(self, id: int) -> bool:
+        """Check if a sample exists for the specified ID."""
+        for sample in self.samples:
+            if sample.key == str(id):
                 return True
         return False
 
@@ -99,12 +101,13 @@ class Decoder(object):
                    inst_head: headers.InstrumentHeader,
                    dct_head: headers.DirectHeader,
                    gb_head: headers.NoiseHeader) -> None:
+        """Initialize a direct with the relevant headers."""
         # yapf: disable
         direct.drum_key  = inst_head.drum_pitch
         direct.output    = engine.DirectTypes(inst_head.channel & 7)
         direct.env_attn  = dct_head.attack
         direct.env_dcy   = dct_head.hold
-        direct.env_sus   = dct_head.sustain
+        direct.env_sus   = dct_head.is_sustain
         direct.env_rel   = dct_head.release
         direct.raw0      = dct_head.b0
         direct.raw1      = dct_head.b1
@@ -128,7 +131,7 @@ class Decoder(object):
         smp_head = headers.rd_smp_head(1, gba_ptr_to_addr(sid))
         if smp.output == engine.DirectTypes.DIRECT:
             w_smp.size = smp_head.size
-            w_smp.freq = smp_head.freq * 64
+            w_smp.frequency = smp_head.frequency * 64
             w_smp.loop_start = smp_head.loop
             w_smp.loop = smp_head.flags > 0
             w_smp.gb_wave = False
@@ -138,7 +141,7 @@ class Decoder(object):
                 w_smp.smp_data = self.file.rd_addr
         else:
             w_smp.size = 32
-            w_smp.freq = self.GB_WAV_BASE_FREQ
+            w_smp.frequency = self.GB_WAV_BASE_FREQ
             w_smp.loop_start = 0
             w_smp.loop = True
             w_smp.gb_wave = True
@@ -160,41 +163,41 @@ class Decoder(object):
 
     get_mul_smp = get_smp
 
-    def get_loop_offset(self, pgm_ctr: int):
+    def get_loop_offset(self, program_ctr: int):
         """Determine the looping address of a track/channel."""
         loop_offset = -1
         while True:
-            self.file.rd_addr = pgm_ctr
+            self.file.rd_addr = program_ctr
             cmd = self.file.rd_byte()
             if 0 <= cmd <= 0xB0 or cmd == 0xCE or cmd == 0xCF or cmd == 0xB4:
-                pgm_ctr += 1
+                program_ctr += 1
             elif cmd == 0xB9:
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | COND JMP |')
-                pgm_ctr += 4
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | COND JMP |')
+                program_ctr += 4
             elif 0xB5 <= cmd <= 0xCD:
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | CMD  ARG |')
-                pgm_ctr += 2
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | CMD  ARG |')
+                program_ctr += 2
             elif cmd == 0xB2:
                 loop_offset = self.file.rd_gba_ptr()
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | JMP ADDR | {loop_offset:<#x}'
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | JMP ADDR | {loop_offset:<#x}'
                 )
-                pgm_ctr += 5
+                program_ctr += 5
                 break
             elif cmd == 0xB3:
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | SUB ADDR |')
-                pgm_ctr += 5
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | SUB ADDR |')
+                program_ctr += 5
             elif 0xD0 <= cmd <= 0xFF:
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | BGN NOTE |')
-                pgm_ctr += 1
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | BGN NOTE |')
+                program_ctr += 1
                 while self.file.rd_byte() < 0x80:
-                    pgm_ctr += 1
+                    program_ctr += 1
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | END NOTE |')
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | END NOTE |')
 
             if cmd == 0xb1:
                 break
@@ -202,10 +205,11 @@ class Decoder(object):
         return loop_offset
 
     def load_channel(self, header_ptr: int, table_ptr: int,
-                     track_num: int) -> None:
+                     track_num: int) -> engine.Channel:
+        """Load all track data for a channel."""
         channel = engine.Channel()
-        pgm_ctr = self.file.rd_gba_ptr(header_ptr + 4 + (track_num + 1) * 4)
-        loop_addr = self.get_loop_offset(pgm_ctr)
+        program_ctr = self.file.rd_gba_ptr(header_ptr + 4 + (track_num + 1) * 4)
+        loop_addr = self.get_loop_offset(program_ctr)
 
         inst_head = headers.InstrumentHeader()
         drum_head = headers.DrumKitHeader()
@@ -223,14 +227,14 @@ class Decoder(object):
         insub = 0
         transpose = 0
         channel.loop_ptr = -1
-        evt_queue = channel.evt_queue
+        event_queue = channel.event_queue
 
-        out = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVE)
+        out = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
 
         while True:
-            self.file.rd_addr = pgm_ctr
-            if pgm_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
-                channel.loop_ptr = evt_queue.count
+            self.file.rd_addr = program_ctr
+            if program_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
+                channel.loop_ptr = event_queue.count
 
             cmd = self.file.rd_byte()
             if (cmd != 0xB9 and 0xB5 <= cmd < 0xC5) or cmd == 0xCD:
@@ -238,101 +242,101 @@ class Decoder(object):
                 if cmd == 0xBC:
                     transpose = engine.sbyte_to_int(arg1)
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | SET TRPS | {transpose:<#x}'
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | SET TRPS | {transpose:<#x}'
                     )
                 elif cmd == 0xBD:
                     last_patch = arg1
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | SET INST | {last_patch:<#x}'
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | SET INST | {last_patch:<#x}'
                     )
                 elif cmd in (0xBE, 0xBF, 0xC0, 0xC4, 0xCD):
                     last_cmd = cmd
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | GET ATTR | {last_cmd:<#x}'
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | GET ATTR | {last_cmd:<#x}'
                     )
-                evt_queue.add(cticks, cmd, arg1)
+                event_queue.add(cticks, cmd, arg1)
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT PLAY | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {arg1:<#4x} | ARG2: 0x00 | ARG3: 0x00'
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT PLAY | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {arg1:<#4x} | ARG2: 0x00 | ARG3: 0x00'
                 )
-                pgm_ctr += 2
+                program_ctr += 2
             elif 0xC4 < cmd < 0xCF:
-                evt_queue.add(cticks, cmd)
+                event_queue.add(cticks, cmd)
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT UNKN | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00'
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT UNKN | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00'
                 )
-                pgm_ctr += 1
+                program_ctr += 1
             elif cmd == 0xb9:
                 arg1 = self.file.rd_byte()
                 arg2 = self.file.rd_byte()
                 arg3 = self.file.rd_byte()
-                evt_queue.add(cticks, cmd, arg1, arg2, arg3)
+                event_queue.add(cticks, cmd, arg1, arg2, arg3)
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT JUMP | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {arg1:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x}'
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT JUMP | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {arg1:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x}'
                 )
-                pgm_ctr += 4
+                program_ctr += 4
             elif cmd == 0xb4:
                 if insub == 1:
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | END SUB  |')
-                    pgm_ctr = rpc  # pylint: disable=E0601
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | END SUB  |')
+                    program_ctr = rpc  # pylint: disable=E0601
                     insub = 0
                 else:
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | RTN EXEC |')
-                    pgm_ctr += 1
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | RTN EXEC |')
+                    program_ctr += 1
             elif cmd == 0xb3:
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | BGN SUB  |')
-                rpc = pgm_ctr + 5
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | BGN SUB  |')
+                rpc = program_ctr + 5
                 insub = 1
-                pgm_ctr = self.file.rd_gba_ptr()
+                program_ctr = self.file.rd_gba_ptr()
             elif 0xCF <= cmd <= 0xFF:
-                pgm_ctr += 1
+                program_ctr += 1
                 last_cmd = cmd
 
                 g = False
                 cmd_num = 0
                 while not g:
-                    self.file.rd_addr = pgm_ctr
+                    self.file.rd_addr = program_ctr
                     arg1 = self.file.rd_byte()
                     if arg1 >= 0x80:
                         if cmd_num == 0:
                             patch = lln[cmd_num] + transpose
-                            evt_queue.add(cticks, cmd, patch, llv[cmd_num],
-                                          lla[cmd_num])
+                            event_queue.add(cticks, cmd, patch, llv[cmd_num],
+                                            lla[cmd_num])
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {llv[cmd_num]:<#4x} | ARG3: {lla[cmd_num]:<#4x} | D:    {arg1:<#4x}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {llv[cmd_num]:<#4x} | ARG3: {lla[cmd_num]:<#4x} | D:    {arg1:<#4x}'
                             )
                         g = True
                     else:
                         lln[cmd_num] = arg1
-                        pgm_ctr += 1
+                        program_ctr += 1
                         arg2 = self.file.rd_byte()
                         if arg2 < 0x80:
                             llv[cmd_num] = arg2
-                            pgm_ctr += 1
+                            program_ctr += 1
                             arg3 = self.file.rd_byte()
                             if arg3 >= 0x80:
                                 arg3 = lla[cmd_num]
                                 g = True
                             else:
                                 lla[cmd_num] = arg3
-                                pgm_ctr += 1
+                                program_ctr += 1
                                 cmd_num += 1
                         else:
                             arg2 = llv[cmd_num]
                             arg3 = lla[cmd_num]
                             g = True
                         patch = arg1 + transpose
-                        evt_queue.add(cticks, cmd, patch, arg2, arg3)
+                        event_queue.add(cticks, cmd, patch, arg2, arg3)
                         self.log.debug(
-                            f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
+                            f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
                         )
                     if self.patch_exists(last_patch) is False:
                         inst_head = headers.rd_inst_head(
                             1, table_ptr + last_patch * 12)
                         self.log.debug(
-                            f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
+                            f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                         )
 
                         if inst_head.channel & 0x80 == 0x80:  # Drumkit
@@ -348,28 +352,28 @@ class Decoder(object):
                                 last_patch)].directs[str(patch)], inst_head,
                                             direct_head, noise_head)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | DCT TABLE  | {dct_table}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | direct TABLE  | {dct_table}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | INST HEAD  | {inst_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | INST HEAD  | {inst_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | DCT HEAD   | {direct_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | direct HEAD   | {direct_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NOISE HEAD | {noise_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NOISE HEAD | {noise_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | {self.drumkits[str(last_patch)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | {self.drumkits[str(last_patch)]}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | SET DIRECT | {directs[str(patch)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | SET DIRECT | {directs[str(patch)]}'
                             )
                             if directs[str(patch)].output in out:
                                 self.get_smp(directs[str(patch)], direct_head,
                                              samp_head, False)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {directs[str(patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {directs[str(patch)]}'
                                 )
                         elif inst_head.channel & 0x40 == 0x40:  # Multi
                             multi_head = headers.rd_mul_head(1)
@@ -392,28 +396,28 @@ class Decoder(object):
                                 self.insts[str(last_patch)].directs[str(cdr)],
                                 inst_head, direct_head, noise_head)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | MULTI HEAD | {multi_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | MULTI HEAD | {multi_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW INST   | {self.insts[str(last_patch)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW INST   | {self.insts[str(last_patch)]}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW KEYMAP | {self.insts[str(last_patch)].kmaps.data}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW KEYMAP | {self.insts[str(last_patch)].kmaps.data}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET ASNDCT | {self.insts[str(last_patch)].kmaps[str(patch)].assign_dct}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET ASNDCT | {self.insts[str(last_patch)].kmaps[str(patch)].assign_dct}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | INST HEAD  | {inst_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | INST HEAD  | {inst_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | DCT HEAD   | {direct_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | direct HEAD   | {direct_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NOISE HEAD | {noise_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NOISE HEAD | {noise_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
                             )
                             if self.insts[str(last_patch)].directs[str(
                                     cdr)].output in out:
@@ -421,7 +425,7 @@ class Decoder(object):
                                     last_patch)].directs[str(cdr)], direct_head,
                                              samp_head, True)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                 )
                         else:  # engine.Direct/GB engine.Sample
                             direct_head = headers.rd_dct_head(1)
@@ -431,25 +435,25 @@ class Decoder(object):
                             self.set_direct(self.directs[str(last_patch)],
                                             inst_head, direct_head, noise_head)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | DCT HEAD   | {direct_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW direct   | direct HEAD   | {direct_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | NOISE HEAD | {noise_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW direct   | NOISE HEAD | {noise_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | SET DIRECT | {self.directs[str(last_patch)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW direct   | SET DIRECT | {self.directs[str(last_patch)]}'
                             )
                             if self.directs[str(last_patch)].output in out:
                                 self.get_smp(self.directs[str(last_patch)],
                                              direct_head, samp_head, False)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DCT   | GET SAMPLE | {self.directs[str(last_patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW direct   | GET SAMPLE | {self.directs[str(last_patch)]}'
                                 )
                     else:  # Patch exists
                         inst_head = headers.rd_inst_head(
                             1, table_ptr + last_patch * 12)
                         self.log.debug(
-                            f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PC.EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
+                            f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PC.EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                         )
                         if inst_head.channel & 0x80 == 0x80:
                             drum_head = headers.rd_drmkit_head(1)
@@ -462,16 +466,16 @@ class Decoder(object):
                                 gba_ptr_to_addr(drum_head.dct_tbl + patch * 12)
                                 + 2)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | INST HEAD  | {inst_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | INST HEAD  | {inst_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DCT HEAD   | {direct_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | direct HEAD   | {direct_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NOISE HEAD | {noise_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NOISE HEAD | {noise_head}'
                             )
                             if self.dct_exists(
                                     self.drumkits[str(last_patch)].directs,
@@ -482,7 +486,7 @@ class Decoder(object):
                                     last_patch)].directs[str(patch)], inst_head,
                                                 direct_head, noise_head)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                 )
                                 if self.drumkits[str(last_patch)].directs[str(
                                         patch)].output in out:
@@ -491,12 +495,12 @@ class Decoder(object):
                                                      direct_head, samp_head,
                                                      False)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                     )
                         elif inst_head.channel & 0x40 == 0x40:
                             multi_head = headers.rd_mul_head(1)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
                             )
                             if self.kmap_exists(
                                     self.insts[str(last_patch)].kmaps,
@@ -517,19 +521,19 @@ class Decoder(object):
                                 gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12) +
                                 2)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | SET CDR    | {cdr}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | SET CDR    | {cdr}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | INST HEAD  | {inst_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | INST HEAD  | {inst_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | DCT HEAD   | {direct_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | direct HEAD   | {direct_head}'
                             )
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | NSE HEAD   | {noise_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | NSE HEAD   | {noise_head}'
                             )
                             if self.dct_exists(
                                     self.insts[str(last_patch)].directs,
@@ -540,7 +544,7 @@ class Decoder(object):
                                     last_patch)].directs[str(cdr)], inst_head,
                                                 direct_head, noise_head)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                 )
                                 if self.insts[str(last_patch)].directs[str(
                                         cdr)].output in out:
@@ -549,61 +553,61 @@ class Decoder(object):
                                                      direct_head, samp_head,
                                                      False)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                     )
 
             elif 0x00 <= cmd < 0x80:
                 if last_cmd < 0xCF:
-                    evt_queue.add(cticks, last_cmd, cmd)
+                    event_queue.add(cticks, last_cmd, cmd)
                     self.log.debug(
-                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PREV CMD | TIME: {cticks:<4} | CTRL: {last_cmd:<#4x} | ARG1: {cmd:<#4x} | ARG2: 0x00 | ARG3: 0x00 '
+                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PREV CMD | TIME: {cticks:<4} | CTRL: {last_cmd:<#4x} | ARG1: {cmd:<#4x} | ARG2: 0x00 | ARG3: 0x00 '
                     )
-                    pgm_ctr += 1
+                    program_ctr += 1
                 else:
                     cmd = last_cmd
                     g = False
                     cmd_num = 0
                     while g is False:
-                        self.file.rd_addr = pgm_ctr
+                        self.file.rd_addr = program_ctr
                         arg1 = self.file.rd_byte()
                         if arg1 >= 0x80:
                             if cmd_num == 0:
                                 patch = lln[cmd_num] + transpose
-                                evt_queue.add(cticks, cmd, patch, llv[cmd_num],
-                                              lla[cmd_num])
+                                event_queue.add(cticks, cmd, patch,
+                                                llv[cmd_num], lla[cmd_num])
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PRV NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {llv[cmd_num]:<#4x} | ARG3: {lla[cmd_num]:<#4x} | D:    {arg1:<#4x}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PRV NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {llv[cmd_num]:<#4x} | ARG3: {lla[cmd_num]:<#4x} | D:    {arg1:<#4x}'
                                 )
                             g = True
                         else:
                             lln[cmd_num] = arg1
-                            pgm_ctr += 1
+                            program_ctr += 1
                             arg2 = self.file.rd_byte()
                             if arg2 < 0x80:
                                 llv[cmd_num] = arg2
-                                pgm_ctr += 1
+                                program_ctr += 1
                                 arg3 = self.file.rd_byte()
                                 if arg3 >= 0x80:
                                     arg3 = lla[cmd_num]
                                     g = True
                                 else:
                                     lla[cmd_num] = arg3
-                                    pgm_ctr += 1
+                                    program_ctr += 1
                                     cmd_num += 1
                             else:
                                 arg2 = llv[cmd_num]
                                 arg3 = lla[cmd_num]
                                 g = True
                             patch = arg1 + transpose
-                            evt_queue.add(cticks, cmd, patch, arg2, arg3)
+                            event_queue.add(cticks, cmd, patch, arg2, arg3)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PRV NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PRV NOTE | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: {patch:<#4x} | ARG2: {arg2:<#4x} | ARG3: {arg3:<#4x} | D:    {arg1:<#4x}'
                             )
                         if self.patch_exists(last_patch) is False:
                             inst_head = headers.rd_inst_head(
                                 1, table_ptr + last_patch * 12)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PV PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | CHAN: {inst_head.channel:<#4x}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PV PATCH | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | CHAN: {inst_head.channel:<#4x}'
                             )
                             if inst_head.channel & 0x80 == 0x80:
                                 drum_head = headers.rd_drmkit_head(1)
@@ -623,22 +627,22 @@ class Decoder(object):
                                     last_patch)].directs[str(patch)], inst_head,
                                                 direct_head, noise_head)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | DRM HEAD   | {drum_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | DRM HEAD   | {drum_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | INST HEAD  | {inst_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | INST HEAD  | {inst_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | DCT HEAD   | {direct_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | direct HEAD   | {direct_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NOISE HEAD | {noise_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NOISE HEAD | {noise_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | {self.drumkits[str(last_patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | {self.drumkits[str(last_patch)]}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | NEW DRMKIT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                 )
                                 if self.drumkits[str(last_patch)].directs[str(
                                         patch)].output in out:
@@ -646,7 +650,7 @@ class Decoder(object):
                                         last_patch)].directs[str(patch)],
                                                  direct_head, samp_head, True)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                     )
                             elif inst_head.channel & 0x40 == 0x40:
                                 multi_head = headers.rd_mul_head(1)
@@ -672,28 +676,28 @@ class Decoder(object):
                                     last_patch)].directs[str(cdr)], inst_head,
                                                 direct_head, noise_head)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | MULTI HEAD | {multi_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | MULTI HEAD | {multi_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW INST   | {self.insts[str(last_patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW INST   | {self.insts[str(last_patch)]}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW KEYMAP | {self.insts[str(last_patch)].kmaps}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NEW KEYMAP | {self.insts[str(last_patch)].kmaps}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET ASNDCT | {cdr}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET ASNDCT | {cdr}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | INST HEAD  | {inst_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | INST HEAD  | {inst_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | DCT HEAD   | {direct_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | direct HEAD   | {direct_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NOISE HEAD | {noise_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | NOISE HEAD | {noise_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW MULTI | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                 )
                                 if self.insts[str(last_patch)].directs[str(
                                         cdr)].output in out:
@@ -701,7 +705,7 @@ class Decoder(object):
                                         last_patch)].directs[str(cdr)],
                                                  direct_head, samp_head, False)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | NW DRUM  | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                     )
                             else:
                                 direct_head = headers.rd_dct_head(1)
@@ -716,7 +720,7 @@ class Decoder(object):
                             inst_head = headers.rd_inst_head(
                                 1, table_ptr + last_patch * 12)
                             self.log.debug(
-                                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | PC EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
+                                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | PC EXIST | PREV: {last_patch:<#4x} | PNUM: {patch:<#4x} | HEAD: {inst_head}'
                             )
                             if inst_head.channel & 0x80 == 0x80:
                                 drum_head = headers.rd_drmkit_head(1)
@@ -730,16 +734,16 @@ class Decoder(object):
                                     gba_ptr_to_addr(
                                         drum_head.dct_tbl + patch * 12) + 2)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DRM HEAD   | {drum_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | INST HEAD  | {inst_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | INST HEAD  | {inst_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | DCT HEAD   | {direct_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | direct HEAD   | {direct_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NOISE HEAD | {noise_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NOISE HEAD | {noise_head}'
                                 )
                                 if self.dct_exists(
                                         self.drumkits[str(last_patch)].directs,
@@ -751,7 +755,7 @@ class Decoder(object):
                                                     inst_head, direct_head,
                                                     noise_head)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | SET DIRECT | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                     )
                                     if self.drumkits[str(last_patch)].directs[
                                             str(patch)].output in out:
@@ -760,12 +764,12 @@ class Decoder(object):
                                             .directs[str(patch)], direct_head,
                                             samp_head, False)
                                         self.log.debug(
-                                            f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
+                                            f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | DM EXIST | NEW DIRECT | GET SAMPLE | {self.drumkits[str(last_patch)].directs[str(patch)]}'
                                         )
                             elif inst_head.channel & 0x40 == 0x40:
                                 multi_head = headers.rd_mul_head(1)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | MULTI HEAD | {multi_head}'
                                 )
                                 if self.kmap_exists(
                                         self.insts[str(last_patch)].kmaps,
@@ -786,19 +790,19 @@ class Decoder(object):
                                     gba_ptr_to_addr(
                                         multi_head.dct_tbl + cdr * 12) + 2)
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | {self.insts[str(last_patch)].kmaps[str(patch)]}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | SET CDR    | {cdr}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | SET CDR    | {cdr}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | INST HEAD  | {inst_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | INST HEAD  | {inst_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | DCT HEAD   | {direct_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | direct HEAD   | {direct_head}'
                                 )
                                 self.log.debug(
-                                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | NSE HEAD   | {noise_head}'
+                                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | NEW KEYMAP | NSE HEAD   | {noise_head}'
                                 )
                                 if self.dct_exists(
                                         self.insts[str(last_patch)].directs,
@@ -810,7 +814,7 @@ class Decoder(object):
                                                     inst_head, direct_head,
                                                     noise_head)
                                     self.log.debug(
-                                        f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                        f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | SET DIRECT | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                     )
                                     if self.insts[str(last_patch)].directs[str(
                                             cdr)].output in out:
@@ -819,24 +823,24 @@ class Decoder(object):
                                                 str(cdr)], direct_head,
                                             samp_head, False)
                                         self.log.debug(
-                                            f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | ML EXIST | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
+                                            f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | ML EXIST | GET SAMPLE | {self.insts[str(last_patch)].directs[str(cdr)]}'
                                         )
             elif 0x80 <= cmd <= 0xB0:
-                evt_queue.add(cticks, cmd)
+                event_queue.add(cticks, cmd)
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT WAIT | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00 | TIME: {engine.stlen_to_ticks(cmd - 0x80):<#4x}'
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT WAIT | TIME: {cticks:<4} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00 | TIME: {engine.stlen_to_ticks(cmd - 0x80):<#4x}'
                 )
                 cticks += engine.stlen_to_ticks(cmd - 0x80)
-                pgm_ctr += 1
+                program_ctr += 1
             if cmd in (0xB1, 0xB2, 0xB6):
                 self.log.debug(
-                    f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | END EVT  |')
-                #evt_queue.add(cticks, c)
+                    f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | END EVT  |')
+                #event_queue.add(cticks, c)
                 break
             self.log.debug(
-                f'| PGM: {pgm_ctr:#x} | CMD: {cmd:#x} | EVT END  | TIME: {cticks:<4x} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00'
+                f'| PGM: {program_ctr:#x} | CMD: {cmd:#x} | EVT END  | TIME: {cticks:<4x} | CTRL: {cmd:<#4x} | ARG1: 0x00 | ARG2: 0x00 | ARG3: 0x00'
             )
-        evt_queue.add(cticks, cmd)
+        event_queue.add(cticks, cmd)
 
         return channel
 
@@ -847,7 +851,6 @@ class Decoder(object):
         instruments. Subsequently loads all events commands the Sappy engine
         uses into an event queue for playback processing. Is repeatable.
         """
-
         self.file = fileio.open_file(fpath, 1)
         header_ptr = self.file.rd_gba_ptr(sng_list_ptr + sng_num * 8)
         num_tracks = self.file.rd_byte(header_ptr)
@@ -865,7 +868,8 @@ class Decoder(object):
             echo=echo,
             priority=priority,
             header_ptr=header_ptr,
-            voice_ptr=inst_table_ptr)
+            voice_ptr=inst_table_ptr,
+            unknown=unk)
 
         channels = engine.ChannelQueue()
         for track_num in range(num_tracks):
