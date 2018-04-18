@@ -22,18 +22,13 @@ def main():
                   )
     args = p.parse_args()
 
-    dec = Player()
-
-    print("Playing: ",
-          args.path.split('\\')[-1], " Song number: ", args.song_num)
-    print()
-
+    player = Player()
     try:
-        dec.play_song(args.path, int(args.song_num), int(args.song_table, 16))
+        player.play_song(args.path, int(args.song_num), int(args.song_table, 16))
 
     except KeyboardInterrupt:
         print("Exiting...")
-        dec.stop_song()
+        player.stop_song()
         exit(0)
 
 

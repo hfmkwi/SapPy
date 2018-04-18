@@ -42,9 +42,10 @@ class Player(object):
     """
 
     DEBUG = False
+    DISPLAY_NOTES = False
     GB_SQ_MULTI = 0.5 / 4
     SAPPY_PPQN = 24
-    WIDTH = 33
+    WIDTH = 24
 
     if DEBUG:
         logging.basicConfig(level=logging.DEBUG)
@@ -912,9 +913,9 @@ class Player(object):
         """
         for item in self.note_queue:
             note_num = self.free_note()
-            self.debug_processor('GET FREE NOTE', item.parent, note_num)
             if note_num is None:
                 continue
+            self.debug_processor('GET FREE NOTE', item.parent, note_num)
 
             self.note_arr[note_num] = item
             chan = self.channels[item.parent]
@@ -1113,7 +1114,7 @@ class Player(object):
                         note.env_step = 0x100 - (note.env_attn * 8)
                     elif note.phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
-                        note.env_dest = 255 / note.env_sus * 2
+                        note.env_dest = 255 / (note.env_sus + 1) * 2
                         note.env_step = (-note.env_dcy) / 2
                     elif note.phase == engine.NotePhases.RELEASE:
                         note.phase = engine.NotePhases.NOTEOFF
@@ -1188,7 +1189,8 @@ class Player(object):
         fmod.systemClose()
         return 0
 
-    def get_player_header(self) -> str:
+    def get_player_header(self, meta_data: decoder.MetaData,
+                          channel_queue: engine.ChannelQueue) -> str:
         """Construct the interface header.
 
         Constructs a column-based display, with each column representing one
@@ -1204,8 +1206,11 @@ class Player(object):
         self.update_channels()
 
         # Construct the top header
+        name = f'ROM: {meta_data.rom_name}'
+        code = f'CODE: {meta_data.code}'
+        info = ''.join([name, '\n', code, '\n'])
         header = []
-        for chan_id, chan in enumerate(self.channels):
+        for chan_id, chan in enumerate(channel_queue):
             header.append(
                 f'| CHAN{chan_id:<2}{chan.output_type.name:>{self.WIDTH - 8}} ')
         header.append('| TEMPO |')
@@ -1214,7 +1219,7 @@ class Player(object):
         # Construct the seperator
         seperator = '+' + '+'.join(
             [f'{"":->{self.WIDTH}}'] * self.channels.count) + '+-------+'
-        return header + '\n' + seperator
+        return info + seperator + '\n' + header + '\n' + seperator
 
     def display(self) -> None:
         """Update and display the interface."""
@@ -1285,15 +1290,14 @@ class Player(object):
         """Play a song in the specified ROM."""
         d = decoder.Decoder()
         self.reset_player()
-        self.channels, self.drumkits, self.samples, self.insts, self.directs, self.meta_data = d.load_song(
+        self.channels, self.drumkits, self.samples, self.insts, self.directs, meta_data = d.load_song(
             fpath, song_num, song_table)
         if len(self.channels) == 0:
             return
         self.init_player(fpath)
 
-        header = self.get_player_header()
-        print(self.meta_data)
-        print(header)
+        header = self.get_player_header(meta_data, self.channels)
+        sys.stdout.write(header + '\n')
         self.process()
 
     def process(self) -> None:
@@ -1439,9 +1443,9 @@ class Player(object):
 
     def reset_note(self, note: engine.Note):
         """Revert a note to default state and remove it from the interface."""
-        self.note_off = True
-        self.wait_ticks = 0
-        self.vib_pos = 0.0
+        note.note_off = True
+        note.wait_ticks = 0
+        note.vib_pos = 0.0
         chan = self.channels[note.parent]
         if note.note_num in chan.notes_playing:
             chan.notes_playing.remove(note.note_num)

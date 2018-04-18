@@ -22,6 +22,16 @@ gba_ptr_to_addr = fileio.VirtualFile.gba_ptr_to_addr
 class MetaData(typing.NamedTuple):
     """Meta-data for a ROM."""
 
+    REGION = {
+        'J': 'JAP',
+        'E': 'USA',
+        'P': 'EUR',
+        'D': 'GER',
+        'F': 'FRE',
+        'I': 'ITA',
+        'S': 'SPA'
+    }
+
     rom_name: str
     rom_code: str
     tracks: int
@@ -36,14 +46,22 @@ class MetaData(typing.NamedTuple):
         """Echo flag."""
         return bin(self.echo).lstrip('0b')[0] == 1
 
+    @property
+    def code(self):
+        return f'AGB-{self.rom_code}-{self.region}'
+
+    @property
+    def region(self):
+        return self.REGION.get(self.rom_code[3])
+
 
 class Decoder(object):
     """Decoder/interpreter for Sappy code."""
 
     DEBUG = False
-    GB_WAV_MULTI = 0.5 # 0.0 - 1.0
-    GB_WAV_BASE_FREQ = 880 # Frequency in Hertz
-    GB_NSE_MULTI = 0.5 # 0.0 - 1.0
+    GB_WAV_MULTI = 0.5  # 0.0 - 1.0
+    GB_WAV_BASE_FREQ = 880  # Frequency in Hertz
+    GB_NSE_MULTI = 0.5  # 0.0 - 1.0
 
     if DEBUG:
         logging.basicConfig(level=DEBUG)
