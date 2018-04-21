@@ -1,4 +1,4 @@
-#-*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """API for FMOD (Direct clone from original source)."""
 import ctypes
 import enum

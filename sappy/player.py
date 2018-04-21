@@ -1,4 +1,4 @@
-#-*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """All playback related functionality for the Sappy Engine.
 
 Attributes
@@ -897,10 +897,7 @@ class Player(object):
                         note.phase = engine.NotePhases.ATTACK
                         note.env_pos = 0
                         note.env_dest = 255
-                        if note.env_atck == 0:
-                            note.env_step = 255
-                        else:
-                            note.env_step = note.env_atck * 16
+                        note.env_step = note.env_atck * 16
                     elif note.phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
                         note.env_dest = (note.env_sus) * 16
@@ -1005,8 +1002,6 @@ class Player(object):
 
     def display(self) -> None:
         """Update and display the interface."""
-        # if self.SHOW_FMOD_EXECUTION or self.SHOW_PROCESSOR_EXECUTION:
-        #     return
         out = self.update_interface()
         sys.stdout.write(out + '\r')
         sys.stdout.flush()
@@ -1065,18 +1060,26 @@ class Player(object):
     def play_song(self, fpath: str, song_num: int, song_table: int) -> None:
         """Play a song in the specified ROM."""
         d = parser.Parser()
-        self.reset_player()
-        self.channels, self.drumkits, self.samples, self.insts, self.directs, meta_data = d.load_song(
-            fpath, song_num, song_table)
-        if len(self.channels) == 0:
+        song = d.get_song(fpath, song_num, song_table)
+        if song == -1:
+            print('Invalid/Unsupported ROM.')
             return
+        elif song == -2:
+            print('Invalid song number.')
+            return
+        self.reset_player()
+        self.channels = song.channels
+        self.drumkits = song.drumkits
+        self.samples = song.samples
+        self.insts = song.insts
+        self.directs = song.directs
         self.init_player(fpath)
 
-        header = self.get_player_header(meta_data, self.channels)
+        header = self.get_player_header(song.meta_data, song.channels)
         sys.stdout.write(header + '\n')
-        self.process()
+        self.execute_processor()
 
-    def process(self) -> None:
+    def execute_processor(self) -> None:
         """Execute the event processor and update the user display.
 
         Notes
@@ -1088,7 +1091,7 @@ class Player(object):
 
             The loop delay is calculated based on the following equation:
 
-            FLOOR(1000/TEMPO*2.5 - ELAPSED) / 1000
+            ROUND(FLOOR((1/TEMPO*2.5 - ELAPSED) * 1000) / 1000, 3)
 
             Additionally, all functions used within the mainloop are
             assigned local copies to avoid the global function
@@ -1103,12 +1106,10 @@ class Player(object):
         d = self.display
         while True:
             st = t()
-            if not e() or d():
+            if e() is None or d():
                 break
-            while r(f((1/self.tempo*1 - (t() - st)) * 1000) / 1000, 3) < 0:
-                st = t()
-                e()
-                d()
+            if r(f((1/self.tempo*2.5 - (t() - st)) * 1000) / 1000, 3) < 0:
+                continue
             s(r(f((1/self.tempo*2.5 - (t() - st)) * 1000) / 1000, 3))
 
     def stop_song(self):
@@ -1122,5 +1123,4 @@ class Player(object):
         if note.note_num in chan.notes_playing:
             chan.notes_playing.remove(note.note_num)
         note.note_off = True
-        #note.wait_ticks = 0
         note.vib_pos = 0.0

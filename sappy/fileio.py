@@ -1,4 +1,4 @@
-#-*- coding: utf-8 -*-
+# -*- coding: utf-8 -*-
 """Provides File IO for Sappy."""
 import os
 import struct
@@ -196,7 +196,7 @@ class VirtualFile(object):
 
     @address.setter
     def address(self, addr: int) -> None:
-        if addr is not None:
+        if addr is not None and addr < self.size:
             self._address = addr
             self._file.seek(self._address)
 
@@ -470,13 +470,19 @@ class VirtualFile(object):
                 instruction = header.pop(0)
                 if instruction == search_bytes[match] or search_bytes[match] == None:
                     match += 1
+                    if match == 7:
+                        break
                 else:
                     match = 0
             if match < 7:
                 continue
             self._file.seek(self._file.tell() + 4)
-            ptr = int.from_bytes(self._file.read(4), 'little')
-            return gba_ptr_to_addr(ptr)
+            addr = int.from_bytes(self._file.read(4), 'little')
+            ptr = gba_ptr_to_addr(addr)
+            if ptr > self.size:
+                continue
+            return ptr
+
 
 
 def open_file(file_path: str) -> VirtualFile:
