@@ -12,12 +12,11 @@ LIBDIR = os.path.join(sys.path[0], 'lib')
 OS = platform.system()
 ARCH = platform.machine()
 
-if ARCH in ('x86_64', 'i386', 'x86') and OS == 'Windows':
+if ARCH in ('AMD64', 'i386') and OS == 'Windows':
     LIB = 'fmod.dll'
-elif ARCH == 'x86' and OS == 'Linux':
+elif ARCH == 'i386' and OS == 'Linux':
     LIB = 'libfmod.so.10'
 else:
-    print(ARCH)
     LIB = None
 
 if LIB is not None:
@@ -28,15 +27,14 @@ if LIB is not None:
     systemInit.restype = ctypes.c_bool
 
     setOutput = fmod.FSOUND_SetOutput
-    setOutput.argtypes = (ctypes.c_int)
+    setOutput.argtypes = (ctypes.c_int,)
     setOutput.restype = ctypes.c_bool
 
     setMasterVolume = fmod.FSOUND_SetSFXMasterVolume
-    setMasterVolume.argtypes = (ctypes.c_int)
+    setMasterVolume.argtypes = (ctypes.c_int,)
     setMasterVolume.restype = ctypes.c_bool
 
     getError = fmod.FSOUND_GetError
-    getError.argtypes = ()
     getError.restype = ctypes.c_uint
 
     sampleLoad = fmod.FSOUND_Sample_Load
@@ -54,7 +52,7 @@ if LIB is not None:
     playSound.restype = ctypes.c_int
 
     stopSound = fmod.FSOUND_StopSound
-    stopSound.argtypes = (ctypes.c_int)
+    stopSound.argtypes = (ctypes.c_int,)
     stopSound.restype = ctypes.c_bool
 
     setFrequency = fmod.FSOUND_SetFrequency
@@ -70,7 +68,6 @@ if LIB is not None:
     setVolume.restype = ctypes.c_bool
 
     systemClose = fmod.FSOUND_Close
-    systemClose.argtypes = ()
     systemClose.restype = ctypes.c_void_p
 
     enableFX = fmod.FSOUND_FX_Enable
@@ -87,7 +84,7 @@ if LIB is not None:
     setPaused.restype = ctypes.c_bool
 
     disableFX = fmod.FSOUND_FX_Disable
-    disableFX.argtypes = (ctypes.c_int)
+    disableFX.argtypes = (ctypes.c_int,)
     disableFX.restype = ctypes.c_bool
 else:
     import random
@@ -184,8 +181,6 @@ class FSoundChannelSampleMode(enum.IntEnum):
     SYSTEMCHANNEL = -1000
     SYSTEMSAMPLE = -1000
 
-
-# yapf: enable
 
 e = FModErrors
 FMOD_ERR_MESSAGES = {

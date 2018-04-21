@@ -1,77 +1,183 @@
-#!/usr/bin/python3
 #-*- coding: utf-8 -*-
-# pylint: disable=C0103,C0123,W0212,W0622
 """Provides File IO for Sappy."""
+import os
 import struct
-from os.path import (exists, getsize, isabs, isfile)
-
-__all__ = ('Error', 'VirtualFile', 'open_file', 'open_new_file')
-
-
-class Error(Exception):
-    """Module-level base exception."""
-
-    def __init__(self, msg: str, code: int) -> None:
-        """Init an exception with a message and error code."""
-        super().__init__()
-        self.msg = msg
-        self.code = code
+import typing
+import array
 
 
-class VirtualFile(object):  # pylint: disable=R0902
+class DirectHeader(typing.NamedTuple):
+    """Data for a DirectSound instrument."""
+
+    b0: int = 0
+    b1: int = 0
+    smp_head: int = 0
+    attack: int = 0
+    hold: int = 0
+    is_sustain: int = 0
+    release: int = 0
+
+
+class DrumKitHeader(typing.NamedTuple):
+    """Data for a Drumkit instrument."""
+
+    b0: int = 0
+    b1: int = 0
+    dct_tbl: int = 0
+    b6: int = 0
+    b7: int = 0
+    b8: int = 0
+    b9: int = 0
+
+
+class InstrumentHeader(typing.NamedTuple):
+    """Data for a standard instrument."""
+
+    channel: int = 0
+    drum_pitch: int = 0
+
+
+class InvalidHeader(typing.NamedTuple):
+    """Data for an invalid data."""
+
+    b0: int = 0
+    b1: int = 0
+    b2: int = 0
+    b3: int = 0
+    b4: int = 0
+    b5: int = 0
+    b6: int = 0
+    b7: int = 0
+    b8: int = 0
+    b9: int = 0
+
+
+class MasterTableEntry(typing.NamedTuple):
+    """Song entry as read from ROM."""
+
+    song: int = 0
+    pri1: int = 0
+    pri2: int = 0
+
+
+class MultiHeader(typing.NamedTuple):
+    """Data for MultiSample instrument."""
+
+    b0: int = 0
+    b1: int = 0
+    dct_tbl: int = 0
+    kmap: int = 0
+
+
+class NoiseHeader(typing.NamedTuple):
+    """Data for simulated AGB noise."""
+
+    b0: int = 0
+    b1: int = 0
+    b2: int = 0
+    b3: int = 0
+    b4: int = 0
+    b5: int = 0
+    attack: int = 0
+    decay: int = 0
+    is_sustain: int = 0
+    release: int = 0
+
+
+class SampleHeader(typing.NamedTuple):
+    """Data for an AGB sound sample."""
+
+    flags: int = 0
+    b4: int = 0
+    fine_tune: int = 0
+    frequency: int = 0
+    loop: int = 0
+    size: int = 0
+
+
+class SongHeader(typing.NamedTuple):
+    """Data for an AGB song."""
+
+    tracks: int = 0
+    blks: int = 0
+    pri: int = 0
+    reverb: int = 0
+    inst_bank: int = 0
+
+
+class SquareOneHeader(typing.NamedTuple):
+    """Data for a Square1 instrument."""
+
+    raw1: int = 0
+    raw2: int = 0
+    duty_cycle: int = 0
+    b3: int = 0
+    b4: int = 0
+    b5: int = 0
+    attack: int = 0
+    decay: int = 0
+    is_sustain: int = 0
+    release: int = 0
+
+
+class SquareTwoHeader(typing.NamedTuple):
+    """Data for a Square2 instrument."""
+
+    b0: int = 0
+    b1: int = 0
+    duty_cycle: int = 0
+    b3: int = 0
+    b4: int = 0
+    b5: int = 0
+    attack: int = 0
+    decay: int = 0
+    is_sustain: int = 0
+    release: int = 0
+
+
+class WaveHeader(typing.NamedTuple):
+    """Data for a Wave instrument."""
+
+    b0: int = 0
+    b1: int = 0
+    sample: int = 0
+    attack: int = 0
+    decay: int = 0
+    is_sustain: int = 0
+    release: int = 0
+
+
+class VirtualFile(object):
     """Base file object."""
 
-    _ftable = {}
-
-    def __init__(self, path: str = None, id: int = None) -> None:
+    def __init__(self, path: str = None) -> None:
         """Init a file object with basic IO functions.
 
         Parameters
         ----------
         path
             absolute file path to an existing file
-        id
-            file ID number
 
         Attributes
         ----------
-        _ftable
-            A table holding references to all open files stored under
-            their respective IDs.
-        id
-            file number for API identification.
         file
             root file object used for read/write operations.
         path
             file path of the file intended for access.
-        rd_addr
+        address
             offset of the read head
         wr_addr
             offset of the write head
 
         """
-        self._path = path  # Set file name for local access
-
-        # Define file ID
-        if not self._chk_id(id):
-            self._id = self._get_free_id()
-        else:
-            self._id = id
-            self._ftable[id] = self
-
-        # Create an IO object for file access
-        if self._path and self._chk_path():
-            self._file = open(self.path, 'rb+')
-        else:
-            self._file = None
-
-        self._wr_addr = self._rd_addr = 0
+        self._path = path
+        self._file = open(self.path, 'rb+', 8192)
+        self._wr_addr = self._address = 0
 
     def __enter__(self):
         """Create a temporary VirtualFile."""
-        self.wr_addr = 0
-        self.rd_addr = 0
-        self._file = open(self.path, 'rb+')
+        self.address = 0
+        self._file = open(self.path, 'rb+', 8192)
         return self
 
     def __exit__(self, exc_type, exc_val, exc_tb):
@@ -84,195 +190,30 @@ class VirtualFile(object):  # pylint: disable=R0902
         return self._path
 
     @property
-    def id(self) -> int:
-        """Return the file ID."""
-        return self._id
-
-    @property
-    def rd_addr(self) -> int:
+    def address(self) -> int:
         """Return the address of the read head."""
-        return self._rd_addr
+        return self._address
 
-    @rd_addr.setter
-    def rd_addr(self, addr: int = None) -> None:
-        if addr is not None and addr >= 0:
-            self._rd_addr = addr
-        else:
-            self._rd_addr = self._rd_addr
+    @address.setter
+    def address(self, addr: int) -> None:
+        if addr is not None:
+            self._address = addr
+            self._file.seek(self._address)
 
     @property
     def size(self):
         """Return size of the file in bytes."""
-        return getsize(self.path)
+        return os.path.getsize(self.path)
 
-    @property
-    def wr_addr(self) -> int:
-        """Return the address of the write head."""
-        return self._wr_addr
-
-    @wr_addr.setter
-    def wr_addr(self, addr: int = None) -> None:
-        if addr is not None and addr >= 0:
-            self._wr_addr = addr
-
-    @staticmethod
-    def gba_ptr_to_addr(ptr: int) -> int:
-        """Convert an AGB rom pointer to an integer.
-
-        An AGB rom pointer is a 4 byte stream in little-endian format in the
-        following format:
-
-        0x[08-09][00-FF][00-FF][00-FF]
-
-        Args:
-            pointer: an AGB rom pointer
-
-        Returns:
-            An AGB rom pointer as an integer on success, otherwise -1
-
-        """
-        if ptr < 0x8000000 or ptr > 0x9FFFFFF:
-            return -1
-        return ptr - 0x8000000
-
-    @staticmethod
-    def from_id(id: int) -> 'File':
-        """Retrieve a file object from it's internal ID."""
-        return __class__._ftable.get(id)
-
-    def _chk_id(self, id: int) -> bool:
-        """Check if the specified file ID is valid and unused.
-
-        Args:
-            file_id: file ID to check
-
-        Returns:
-            True if successful, False otherwise.
-
-        Raises:
-            Error: 'invalid file number'
-
-        """
-        return id not in self._ftable and type(id) == int
-
-    def _chk_path(self) -> bool:
-        """Check if a file path refers to an existing file and not a directory.
-
-        Returns:
-            True if successful, False otherwise.
-
-        """
-        path = self._path
-        return exists(path) and isfile(path) and isabs(path)
-
-    def _close(self) -> None:
-        """Close a file by ID.
-
-        Deletes the reference in the file table and frees the ID for use
-
-        Args:
-            file_id: file ID number
-
-        """
-        self._file.close()
-        self._ftable.pop(self._id)
-        del self
-
-    def _get(self, addr: int = None) -> int:
-        """Imitation of the VB6 `Get` keyword in binary mode.
-
-        Args:
-            offset: position to move the read head to
-                if None, defaults to the current position of the read head
-
-        Returns:
-            A int-like object representing one single byte
-
-        """
-        self.rd_addr = addr
-        self._file.seek(self.rd_addr)
-        byte = ord(self._file.read(1))
-        self.rd_addr += 1
-        return byte
-
-    def _get_free_id(self) -> int:
-        """Return a free file id (internal use only).
-
-        Returns:
-            A number (0<=n<256) representing a free file on success
-
-        Raises:
-            Error: 'all files are currently in use'
-
-        """
-        for file_id in range(256):
-            if file_id not in self._ftable:
-                self._ftable[file_id] = 1
-                return file_id
-        raise Error(msg='all files are currently in use', code=1)
-
-    def _put(self, data: int, addr: int = None) -> None:
-        """Imitation of the VB6 `Put` keyword in binary mode.
-
-        Args:
-            data: data to be written to file
-            addr: the offset in the file at which to relocate the write head
-                and write to
-                if None, defaults to the write head's current position
-
-        """
-        self.wr_addr = addr
-        self._file.seek(self.wr_addr)
-        data = struct.pack('B', data)
-        self._file.write(data)
-        self.wr_addr = self._file.tell()
-
-    def close(self, id: int = None) -> None:
+    def close(self) -> None:
         """Close the current file.
 
         Args:
             id: a valid file ID
 
         """
-        if not self._chk_id(id):
-            id = self.id
-        if self.id != id:
-            file = self._ftable.get(id)
-            file.close(file.file_id)
-        else:
-            self._close()
-
-    wr_byte = _put
-
-    def wr_bgendian(self, width: int, data: int, addr: int = None) -> None:
-        """Write an integer as int in big-endian format to file.
-
-        Args:
-            width: maximum size of data in int form
-            data: data to write to file
-            addr: address to move the write head to
-                if None, defaults to the write head's current position.
-
-        """
-        self.wr_addr = addr
-        for i in range(width):
-            byte = data // 16**(i * 2) % 256
-            self.wr_byte(byte)
-
-    def wr_ltendian(self, width: int, data: int, addr: int = None) -> None:
-        """Write an integer as int in little-endian format to file.
-
-        Args:
-            width: maximum byte width of the data
-            data: data to write to file
-            addr: address to move the write head to
-                if None, defaults to the write head's current position.
-
-        """
-        self.wr_addr = addr
-        for i in range(width - 1, -1, -1):
-            byte = data // 16**(i * 2) % 256
-            self.wr_byte(byte)
+        self._file.close()
+        del self
 
     def wr_str(self, data: str, addr: int = None) -> None:
         """Write a string as int to file.
@@ -285,7 +226,7 @@ class VirtualFile(object):  # pylint: disable=R0902
         self.wr_addr = addr
         data = map(ord, data)
         for char in data:
-            self.wr_byte(char)
+            self._file.write(bytes([char]))
 
     def rd_byte(self, addr: int = None) -> int:
         """Read a byte from file.
@@ -298,29 +239,8 @@ class VirtualFile(object):  # pylint: disable=R0902
             an integer [0-255]
 
         """
-        return self._get(addr)
-
-    def rd_vlq(self, addr: int = None) -> int:
-        """Read a stream of int in VLQ format.
-
-        Args:
-            addr: a valid address in the file at which to move the read head
-                if None, defaults to the read head's current position
-
-        Returns:
-            an integer
-
-        """
-        self.rd_addr = addr
-        vlq = 0
-        ret_len = 0
-        while True:
-            byte = self.rd_byte()
-            vlq = vlq * 2**7 + (byte % 0x80)
-            ret_len += 1
-            if ret_len == 4 or byte < 0x80:
-                break
-        return vlq
+        self.address = addr
+        return int.from_bytes(self._file.read(1), 'little')
 
     def rd_bgendian(self, width: int, addr: int = None) -> int:
         """Read a stream of int in big-endian format.
@@ -334,11 +254,9 @@ class VirtualFile(object):  # pylint: disable=R0902
             An integer
 
         """
-        self.rd_addr = addr
-        out = 0
-        for i in range(width - 1, -1, -1):
-            out += self.rd_byte() * 256**i
-        return out
+        self.address = addr
+        return int.from_bytes(self._file.read(width), 'big')
+
 
     def rd_ltendian(self, width: int, addr: int = None) -> int:
         """Read a stream of int in little-endian format.
@@ -352,11 +270,8 @@ class VirtualFile(object):  # pylint: disable=R0902
             An integer
 
         """
-        self.rd_addr = addr
-        out = 0
-        for i in range(width):
-            out += self.rd_byte() * 256**i
-        return out
+        self.address = addr
+        return int.from_bytes(self._file.read(width), 'little')
 
     def rd_str(self, length: int, addr: int = None) -> str:
         """Read a stream of int as a string from file.
@@ -370,14 +285,8 @@ class VirtualFile(object):  # pylint: disable=R0902
             A string of the specified length
 
         """
-        self.rd_addr = addr
-        out = []
-        for __ in range(length):
-            b = self.rd_byte()
-            out.append(b)
-        #out = [i if i != 0 else 32 for i in out]
-        out = map(chr, out)
-        return ''.join(out)
+        self.address = addr
+        return self._file.read(length).decode('utf-8')
 
     def rd_gba_ptr(self, addr: int = None) -> int:
         """Read a stream of int as an AGB rom pointer.
@@ -390,18 +299,200 @@ class VirtualFile(object):  # pylint: disable=R0902
             An AGB rom pointer as an integer on success, otherwise -1
 
         """
-        self.rd_addr = addr
+        self.address = addr
         ptr = self.rd_ltendian(4)
-        return self.gba_ptr_to_addr(ptr)
+        return gba_ptr_to_addr(ptr)
+
+    def rd_dct_head(self, addr: int = None) -> DirectHeader:
+        """Read bytes from a specified file into a Direct header."""
+        self.address = addr
+        header = DirectHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            smp_head=self.rd_ltendian(4),
+            attack=self.rd_byte(),
+            hold=self.rd_byte(),
+            is_sustain=self.rd_byte(),
+            release=self.rd_byte())
+
+        return header
+
+    def rd_drmkit_head(self, addr: int = None) -> DrumKitHeader:
+        """Read bytes from a specified file into a DrumKit header."""
+        self.address = addr
+        header = DrumKitHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            dct_tbl=self.rd_ltendian(4),
+            b6=self.rd_byte(),
+            b7=self.rd_byte(),
+            b8=self.rd_byte(),
+            b9=self.rd_byte())
+
+        return header
+
+    def rd_inst_head(self, addr: int = None) -> InstrumentHeader:
+        """Read bytes from a specified file into a Instrument header."""
+        self.address = addr
+        header = InstrumentHeader(
+            channel=self.rd_byte(), drum_pitch=self.rd_byte())
+
+        return header
+
+    def rd_inv_head(self, addr: int = None) -> InvalidHeader:
+        """Read bytes from a specified file into a Invalid header."""
+        self.address = addr
+        header = InvalidHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            b2=self.rd_byte(),
+            b3=self.rd_byte(),
+            b4=self.rd_byte(),
+            b5=self.rd_byte(),
+            b6=self.rd_byte(),
+            b7=self.rd_byte(),
+            b8=self.rd_byte(),
+            b9=self.rd_byte())
+
+        return header
+
+    def rd_nse_head(self, addr: int = None) -> NoiseHeader:
+        """Read bytes from a specified file into a Noise instrument header."""
+        self.address = addr
+        header = NoiseHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            b2=self.rd_byte(),
+            b3=self.rd_byte(),
+            b4=self.rd_byte(),
+            b5=self.rd_byte(),
+            attack=self.rd_byte(),
+            decay=self.rd_byte(),
+            is_sustain=self.rd_byte(),
+            release=self.rd_byte())
+
+        return header
+
+    def rd_mul_head(self, addr: int = None) -> MultiHeader:
+        """Read bytes from a specified file into a Multi-sample instrument header."""
+        self.address = addr
+        header = MultiHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            dct_tbl=self.rd_ltendian(4),
+            kmap=self.rd_ltendian(4))
+
+        return header
+
+    def rd_smp_head(self, addr: int = None) -> SampleHeader:
+        """Read bytes from a specified file into a Sample header."""
+        self.address = addr
+        header = SampleHeader(
+            flags=self.rd_ltendian(4),
+            b4=self.rd_byte(),
+            fine_tune=self.rd_byte(),
+            frequency=self.rd_ltendian(2),
+            loop=self.rd_ltendian(4),
+            size=self.rd_ltendian(4))
+
+        return header
+
+    def rd_sng_head(self, addr: int = None) -> SongHeader:
+        """Read bytes from a specified file into a Song header."""
+        self.address = addr
+        header = SongHeader(
+            tracks=self.rd_byte(),
+            blks=self.rd_byte(),
+            pri=self.rd_byte(),
+            reverb=self.rd_byte(),
+            inst_bank=self.rd_ltendian(4))
+
+        return header
+
+    def rd_sq1_head(self, addr: int = None) -> SquareOneHeader:
+        """Read bytes from a specified file into a Square1 instrument header."""
+
+        self.address = addr
+        header = SquareOneHeader(
+            raw1=self.rd_byte(),
+            raw2=self.rd_byte(),
+            duty_cycle=self.rd_byte(),
+            b3=self.rd_byte(),
+            b4=self.rd_byte(),
+            b5=self.rd_byte(),
+            attack=self.rd_byte(),
+            decay=self.rd_byte(),
+            is_sustain=self.rd_byte(),
+            release=self.rd_byte())
+        return header
+
+    def rd_sq2_head(self, addr: int = None) -> SquareTwoHeader:
+        """Read bytes from a specified file into a Square2 instrument header."""
+        self.address = addr
+        header = SquareTwoHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            duty_cycle=self.rd_byte(),
+            b3=self.rd_byte(),
+            b4=self.rd_byte(),
+            b5=self.rd_byte(),
+            attack=self.rd_byte(),
+            decay=self.rd_byte(),
+            is_sustain=self.rd_byte(),
+            release=self.rd_byte())
+
+        return header
+
+    def rd_wav_head(self, addr: int = None) -> WaveHeader:
+        """Read bytes from a specified file into a Wave instrument header."""
+        self.address = addr
+        header = WaveHeader(
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            sample=self.rd_ltendian(4),
+            attack=self.rd_byte(),
+            decay=self.rd_byte(),
+            is_sustain=self.rd_byte(),
+            release=self.rd_byte())
+
+        return header
+
+    def get_song_table_ptr(self) -> None:
+        search_bytes = (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801, None, 0x4700_BC01)
+        match = 0
+        header = array.array('I')
+        while True:
+            try:
+                header.fromfile(self._file, 7)
+            except EOFError:
+                return None
+            while len(header) > 0:
+                instruction = header.pop(0)
+                if instruction == search_bytes[match] or search_bytes[match] == None:
+                    match += 1
+                else:
+                    match = 0
+            if match < 7:
+                continue
+            self._file.seek(self._file.tell() + 4)
+            ptr = int.from_bytes(self._file.read(4), 'little')
+            return gba_ptr_to_addr(ptr)
 
 
-def open_file(file_path: str, file_id: int = None) -> VirtualFile:
-    """Open an existing file with read/write access in byte mode."""
-    return VirtualFile(file_path, file_id)
+def open_file(file_path: str) -> VirtualFile:
+    """Open an existing file with read/write access in binary mode."""
+    return VirtualFile(file_path)
 
 
-def open_new_file(file_path: str, file_id: int = None) -> VirtualFile:
-    """Create a new file and open with read/write access in byte mode."""
+def open_new_file(file_path: str) -> VirtualFile:
+    """Create a new file and open with read/write access in binary mode."""
     with open(file_path, 'wb+') as file:
         file.write(bytes(1))
-    return open_file(file_path, file_id)
+    return open_file(file_path)
+
+
+def gba_ptr_to_addr(ptr: int) -> int:
+    """Convert an AGB rom pointer to an address."""
+    if ptr < 0x8000000 or ptr > 0x9FFFFFF:
+        return -1
+    return ptr - 0x8000000
