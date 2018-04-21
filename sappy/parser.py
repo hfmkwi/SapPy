@@ -306,7 +306,7 @@ class Parser(object):
                             self.insts[last_patch] = instrument
                             if direct.output in out:
                                 self.get_smp(direct, direct_head, sample_head,
-                                             True)
+                                             False)
                         else:
                             direct_head = self.file.rd_dct_head()
                             noise_head = self.file.rd_nse_head(table_ptr + last_patch * 12 + 2)

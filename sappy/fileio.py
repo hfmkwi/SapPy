@@ -286,7 +286,7 @@ class VirtualFile(object):
 
         """
         self.address = addr
-        return self._file.read(length).decode('utf-8')
+        return self._file.read(length).decode()
 
     def rd_gba_ptr(self, addr: int = None) -> int:
         """Read a stream of int as an AGB rom pointer.

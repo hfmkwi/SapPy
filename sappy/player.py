@@ -48,9 +48,9 @@ class Player(object):
     SHOW_PROCESSOR_EXECUTION = False
     SHOW_FMOD_EXECUTION = False
     DISPLAY_NOTES = False
-    GB_SQ_MULTI = 0.5 / 4
+    GB_SQ_MULTI = 0.5 / 2
     SAPPY_PPQN = 24
-    WIDTH = 21
+    WIDTH = 33
 
     logging.basicConfig(level=logging.DEBUG)
     PROCESSOR_LOGGER = logging.getLogger('PROCESSOR')
@@ -59,9 +59,6 @@ class Player(object):
         PROCESSOR_LOGGER.setLevel(logging.WARNING)
     if not SHOW_FMOD_EXECUTION:
         FMOD_LOGGER.setLevel(logging.WARNING)
-
-    if WIDTH < 17:
-        WIDTH = 17
 
     def __init__(self, volume=255):
         """Initialize all relevant playback data to default values.
@@ -882,7 +879,7 @@ class Player(object):
                     elif note.phase == engine.NotePhases.RELEASE:
                         note.phase = engine.NotePhases.NOTEOFF
                         note.env_dest = 0
-                        note.env_step = (note.env_rel - 0xFF) / 1.25
+                        note.env_step = (note.env_rel - 0xFF)
                     elif note.phase == engine.NotePhases.NOTEOFF:
                         fmod.setPaused(note.fmod_channel, True)
                         fmod.disableFX(note.fmod_channel)
@@ -900,11 +897,14 @@ class Player(object):
                         note.phase = engine.NotePhases.ATTACK
                         note.env_pos = 0
                         note.env_dest = 255
-                        note.env_step = 0x100 - (note.env_atck * 8)
+                        if note.env_atck == 0:
+                            note.env_step = 255
+                        else:
+                            note.env_step = note.env_atck * 16
                     elif note.phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
-                        note.env_dest = 255 / (note.env_sus + 1) * 2
-                        note.env_step = (-note.env_dcy) / 2
+                        note.env_dest = (note.env_sus) * 16
+                        note.env_step = -(0x8 - note.env_dcy) * 8
                     elif note.phase in (engine.NotePhases.DECAY,
                                         engine.NotePhases.SUSTAIN):
                         note.phase = engine.NotePhases.SUSTAIN
@@ -912,16 +912,10 @@ class Player(object):
                     elif note.phase == engine.NotePhases.RELEASE:
                         note.phase = engine.NotePhases.NOTEOFF
                         note.env_dest = 0
-                        note.env_step = (0x8 - note.env_rel) * 2
+                        note.env_step = -(0x8 - note.env_rel) * 8
                     elif note.phase == engine.NotePhases.NOTEOFF:
-                        if note.output == engine.NoteTypes.SQUARE1:
-                            self.gb1_channel = None
-                        elif note.output == engine.NoteTypes.SQUARE2:
-                            self.gb2_channel = None
-                        elif note.output == engine.NoteTypes.WAVEFORM:
-                            self.gb3_channel = None
-                        elif note.output == engine.NoteTypes.NOISE:
-                            self.gb4_channel = None
+                        assert note.output in self.psg_channels
+                        self.psg_channels[note.output] = None
                         fmod.setPaused(note.fmod_channel, True)
                         fmod.disableFX(note.fmod_channel)
                         self.debug_fmod_playback('DISABLE FX', note.parent,
