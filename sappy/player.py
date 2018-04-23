@@ -1057,7 +1057,7 @@ class Player(object):
         voice_ptr = f'{VERTICAL} VOICE POINTER: {VERTICAL} {"0x":>4}{meta_data.header_ptr:0>8x} {VERTICAL}'
         code = f'{VERTICAL}          CODE: {VERTICAL} {meta_data.code} {VERTICAL}'
         bottom = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>14}{UP_AND_LEFT}'
-        info = '\n'.join((sappy_top, sappy, sappy_bottom, header_top, header, top, table_ptr, song_ptr, code, bottom))+'\n'
+        info = '\n'.join((sappy_top, sappy, sappy_bottom, header_top, header, top, table_ptr, song_ptr, voice_ptr, code, bottom))+'\n'
         header = []
         for chan_id, chan in enumerate(channel_queue):
             header.append(
