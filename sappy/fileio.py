@@ -87,6 +87,9 @@ class NoiseHeader(typing.NamedTuple):
 class SampleHeader(typing.NamedTuple):
     """Data for an AGB sound sample."""
 
+    b0: int = 0
+    b1: int = 0
+    b2: int = 0
     flags: int = 0
     b4: int = 0
     fine_tune: int = 0
@@ -388,7 +391,10 @@ class VirtualFile(object):
         """Read bytes from a specified file into a Sample header."""
         self.address = addr
         header = SampleHeader(
-            flags=self.rd_ltendian(4),
+            b0=self.rd_byte(),
+            b1=self.rd_byte(),
+            b2=self.rd_byte(),
+            flags=self.rd_byte(),
             b4=self.rd_byte(),
             fine_tune=self.rd_byte(),
             frequency=self.rd_ltendian(2),
@@ -457,32 +463,40 @@ class VirtualFile(object):
 
         return header
 
-    def get_song_table_ptr(self) -> None:
-        search_bytes = (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801, None, 0x4700_BC01)
-        match = 0
-        header = array.array('I')
-        while True:
-            try:
-                header.fromfile(self._file, 7)
-            except EOFError:
-                return None
-            while len(header) > 0:
-                instruction = header.pop(0)
-                if instruction == search_bytes[match] or search_bytes[match] == None:
-                    match += 1
-                    if match == 7:
-                        break
-                else:
-                    match = 0
-            if match < 7:
-                continue
-            self._file.seek(self._file.tell() + 4)
-            addr = int.from_bytes(self._file.read(4), 'little')
-            ptr = gba_ptr_to_addr(addr)
-            if ptr > self.size:
-                continue
-            return ptr
+    def get_song_table_ptr(self, track: int) -> None:
+        DEFAULT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801))
+        MT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680B_1909, 0x1C18_6801))
+        ZM_CODE_TABLE = array.array('I', (0x4008_2002, 0xD002_2800, 0x4282_6918, 0x1C20_D003, 0xF001_2100))
+        GENERIC_CODE_TABLE = (DEFAULT_CODE_TABLE, ZM_CODE_TABLE)
+        END_CODE = 0x4700_BC01
+        END_CODE_OFFSET = 6
+        CODE_TABLE_OFFSET = 5
+        OFFSET = 0
+        GAME_CODE = self.rd_str(4, 0xAC)
+        if GAME_CODE[1:3] == 'MT':
+            OFFSET = 2
 
+        self._file.seek(0)
+        thumb_codes = array.array('I')
+        thumb_codes.fromfile(self._file, self.size // thumb_codes.itemsize)
+        for code_ind in range(len(thumb_codes) - END_CODE_OFFSET):
+            l_part = thumb_codes[code_ind:code_ind+CODE_TABLE_OFFSET]
+            if any(l_part == table for table in GENERIC_CODE_TABLE):
+                pass
+            elif l_part == MT_CODE_TABLE:
+                thumb_codes = array.array('I')
+                self._file.seek(OFFSET)
+                thumb_codes.fromfile(self._file, self.size // thumb_codes.itemsize)
+            else:
+                continue
+            r_match = thumb_codes[code_ind+END_CODE_OFFSET] == END_CODE
+            if r_match:
+                ptr = gba_ptr_to_addr(thumb_codes[code_ind+8])
+                if self.rd_gba_ptr(ptr + track * 8) > self.size:
+                    code_ind -= 7
+                    continue
+                return ptr
+        return -1
 
 
 def open_file(file_path: str) -> VirtualFile:

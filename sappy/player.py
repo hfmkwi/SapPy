@@ -23,6 +23,76 @@ import sappy.fmod as fmod
 
 BASE = math.pow(2, 1 / 12)
 
+# Box characters
+LIGHT = 0
+HEAVY = 1
+BOX_STYLE = HEAVY
+if BOX_STYLE == LIGHT:
+    HORIZONTAL = '─'
+    VERTICAL = '│'
+    DOWN_AND_RIGHT = '┌'
+    DOWN_AND_LEFT = '┐'
+    UP_AND_RIGHT = '└'
+    UP_AND_LEFT = '┘'
+    VERTICAL_AND_RIGHT = '├'
+    VERTICAL_AND_LEFT = '┤'
+    DOWN_AND_HORIZONTAL = '┬'
+    UP_AND_HORIZONTAL = '┴'
+    VERTICAL_AND_HORIZONTAL = '┼'
+elif BOX_STYLE == HEAVY:
+    HORIZONTAL = '━'
+    VERTICAL = '┃'
+    DOWN_AND_RIGHT = '┏'
+    DOWN_AND_LEFT = '┓'
+    UP_AND_RIGHT = '┗'
+    UP_AND_LEFT = '┛'
+    VERTICAL_AND_RIGHT = '┣'
+    VERTICAL_AND_LEFT = '┫'
+    DOWN_AND_HORIZONTAL = '┳'
+    UP_AND_HORIZONTAL = '┻'
+    VERTICAL_AND_HORIZONTAL = '╋'
+else:
+    raise ValueError('Invalid line style.')
+
+TEMPO_TOP = f'{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{DOWN_AND_LEFT}'
+TEMPO_BOTTOM = f'{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{VERTICAL_AND_LEFT}'
+
+# Block characters
+H_BOX = 0
+V_BOX = 1
+BLOCK_STYLE = H_BOX
+FULL_BLOCK = '█'
+if BLOCK_STYLE == H_BOX:
+    ONE_EIGHTH_BLOCK = '▏'
+    ONE_QUARTER_BLOCK = '▎'
+    THREE_EIGHTHS_BLOCK = '▍'
+    HALF_BLOCK = '▌'
+    FIVE_EIGHTHS_BLOCK = '▋'
+    THREE_QUARTERS_BLOCK = '▊'
+    SEVEN_EIGHTHS_BLOCK = '▉'
+elif BLOCK_STYLE == V_BOX:
+    ONE_EIGHTH_BLOCK = '▁'
+    ONE_QUARTER_BLOCK = '▂'
+    THREE_EIGHTHS_BLOCK = '▃'
+    HALF_BLOCK = '▄'
+    FIVE_EIGHTHS_BLOCK = '▅'
+    THREE_QUARTERS_BLOCK = '▆'
+    SEVEN_EIGHTHS_BLOCK = '▇'
+else:
+    raise ValueError('Invalid block style.')
+
+BLOCK_TABLE = {
+    0: FULL_BLOCK,
+    1: SEVEN_EIGHTHS_BLOCK,
+    2: THREE_QUARTERS_BLOCK,
+    3: FIVE_EIGHTHS_BLOCK,
+    4: HALF_BLOCK,
+    5: THREE_EIGHTHS_BLOCK,
+    6: ONE_QUARTER_BLOCK,
+    7: ONE_EIGHTH_BLOCK
+}
+
+
 class InstructionSet(enum.IntEnum):
     pass
 
@@ -48,8 +118,8 @@ class Player(object):
     SHOW_PROCESSOR_EXECUTION = False
     SHOW_FMOD_EXECUTION = False
     DISPLAY_NOTES = False
-    GB_SQ_MULTI = 0.5 / 2
-    SAPPY_PPQN = 24
+    INSTRUCTIONS_PER_CYCLE = 24
+    GB_SQ_MULTI = .5
     WIDTH = 33
 
     logging.basicConfig(level=logging.DEBUG)
@@ -174,24 +244,27 @@ class Player(object):
 
     def debug_fmod(self, action: str, *args: typing.List[str]):
         """Output FMOD debug information."""
-        self.FMOD_LOGGER.log(logging.DEBUG,
+        self.FMOD_LOGGER.log(
+            logging.DEBUG,
             f'| FMOD | CODE: {fmod.getError():2} | {action:<16} |{"|".join([f" {arg:<16}" for arg in args]) + "|" if args else ""}'
         )
 
     def debug_fmod_playback(self, action: str, channel_id: int, note_id: int,
                             *args: typing.List[str]):
         """Output playback debug information."""
-        self.FMOD_LOGGER.log(logging.DEBUG,
+        self.FMOD_LOGGER.log(
+            logging.DEBUG,
             f'| FMOD | CODE: {fmod.getError():2} | CHAN: {channel_id:2} | NOTE: {note_id:2} | {action:<16} |{"|".join([f" {arg:<15}" for arg in args]) + "|" if args else ""}'
         )
 
     def show_processor_exec(self, action: str, channel_id: int,
-                        *args: typing.List[str]):
+                            *args: typing.List[str]):
         """Output processor execution information."""
-        arg_str = "|".join([f" {arg:<15}" for arg in args]) + "|" if args else ""
-        self.PROCESSOR_LOGGER.log(logging.DEBUG,
-            f' {action:20} | CHANNEL: {channel_id:2} | {arg_str}'
-        )
+        arg_str = "|".join([f" {arg:<15}" for arg in args
+                           ]) + "|" if args else ""
+        self.PROCESSOR_LOGGER.log(
+            logging.DEBUG,
+            f' {action:20} | CHANNEL: {channel_id:2} | {arg_str}')
 
     def reset_player(self) -> None:
         """Reset the player to a clean state.
@@ -303,27 +376,14 @@ class Player(object):
         for sample in sample_pool.values():
             sample: engine.Sample
             if sample.gb_wave:
-                if type(sample.smp_data) == str:
-                    with fileio.open_new_file('temp.raw') as f:
-                        f.wr_str(sample.smp_data)
-                    sample.fmod_smp = self.load_sample('temp.raw')
-                    os.remove('temp.raw')
-                else:
-                    sample.fmod_smp = self.load_sample(
-                        file_path, sample.smp_data, sample.size)
+                sample.fmod_smp = self.load_sample(file_path, sample.smp_data,
+                                                   sample.size)
                 fmod.setLoopPoints(sample.fmod_smp, 0, 31)
             else:
-                if type(sample.smp_data) == str:
-                    with fileio.open_new_file('temp.raw') as f:
-                        f.wr_str(sample.smp_data)
-                    sample.fmod_smp = self.load_sample(
-                        'temp.raw', loop=sample.loop, gb_wave=False)
-                    os.remove('temp.raw')
-                else:
-                    sample.fmod_smp = self.load_sample(
-                        file_path, sample.smp_data, sample.size, sample.loop, False)
+                sample.fmod_smp = self.load_sample(
+                    file_path, sample.smp_data, sample.size, sample.loop, False)
                 fmod.setLoopPoints(sample.fmod_smp, sample.loop_start,
-                                sample.size - 1)
+                                   sample.size - 1)
 
     def load_square(self, sample_pool: typing.Dict) -> None:
         """Load in all square waves into the sample pool.
@@ -352,8 +412,8 @@ class Player(object):
 
             square = f'square{duty_cycle}'
             filename = f'{square}.raw'
-            with fileio.open_new_file(filename) as f:
-                f.wr_str(smp_data)
+            with open(filename, 'w') as f:
+                f.write(smp_data)
             fmod_smp = self.load_sample(filename, 0, 0)
             fmod.setLoopPoints(fmod_smp, 0, 31)
             sample_pool[square] = engine.Sample(smp_data, size, frequency,
@@ -442,33 +502,29 @@ class Player(object):
 
         """
         for note in self.note_arr:
+            if not note.enable:
+                continue
             chan = self.channels[note.parent]
             if not chan.is_enabled or chan.vib_rate == 0 or chan.vib_depth == 0:
                 continue
-            if not note.enable or note.note_off:
-                continue
 
             delta_freq = math.sin(math.pi * note.vib_pos) * chan.vib_depth
-            pitch = (chan.pitch_bend - 0x40 + delta_freq
-                    ) / 0x40 * chan.pitch_range
+            pitch = (
+                chan.pitch_bend - 0x40 + delta_freq) / 0x40 * chan.pitch_range
             frequency = int(note.frequency * math.pow(BASE, pitch))
             fmod.setFrequency(note.fmod_channel, frequency)
 
-            note.vib_pos += chan.vib_rate / 255
+            note.vib_pos += chan.vib_rate / 96
             note.vib_pos = math.fmod(note.vib_pos, 2)
 
     def advance_notes(self) -> None:
         """Advance each note 1 tick and release all 0-tick notes."""
         for note in self.note_arr:
             note: engine.Note
-            if not note.enable:
-                continue
-
             if note.wait_ticks > 0:
                 note.wait_ticks -= 1
-            if note.wait_ticks <= 0 and note.note_off is False:
-                chan = self.channels[note.parent]
-                if chan.is_sustain is False:
+            if note.wait_ticks <= 0 and not note.note_off:
+                if not self.channels[note.parent].is_sustain:
                     self.reset_note(note)
 
     def update_channels(self) -> None:
@@ -490,12 +546,13 @@ class Player(object):
                     break
                 elif cmd_byte == 0xB9:
                     chan.program_ctr += 1
-                    self.show_processor_exec('CONDITIONAL JUMP (UNUSED)', chan_id,
-                                         '')
+                    self.show_processor_exec('CONDITIONAL JUMP (UNUSED)',
+                                             chan_id, '')
                 elif cmd_byte == 0xBA:
                     chan.priority = args[0]
                     chan.program_ctr += 1
-                    self.show_processor_exec('SET PRIORITY', chan_id, chan.priority)
+                    self.show_processor_exec('SET PRIORITY', chan_id,
+                                             chan.priority)
                 elif cmd_byte == 0xBB:
                     self.tempo = args[0] * 2
                     self.show_processor_exec('SET TEMPO', chan_id, self.tempo)
@@ -503,7 +560,7 @@ class Player(object):
                 elif cmd_byte == 0xBC:
                     chan.transpose = engine.to_int(args[0])
                     self.show_processor_exec('SET TRANSPOSE', chan_id,
-                                         chan.transpose)
+                                             chan.transpose)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xBD:
                     chan.patch_num = args[0]
@@ -516,12 +573,13 @@ class Player(object):
                     else:
                         chan.output_type = engine.ChannelTypes.NULL
                     self.show_processor_exec('SET OUTPUT', chan_id,
-                                         chan.output_type.name)
+                                             chan.output_type.name)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xBE:
                     chan.main_vol = args[0]
                     self.show_processor_exec('SET CHANNEL VOLUME', chan_id,
-                                         chan.main_vol)
+                                             chan.main_vol)
+                    output_volume = []
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
                         if not note.enable or note.parent != chan_id:
@@ -532,16 +590,20 @@ class Player(object):
                             vol = chan.main_vol / 0x7F
                             pos = note.env_pos / 0xFF
                             dav = round(vel * vol * pos * 255)
-                        chan.output_volume = dav
+                        output_volume.append(dav)
                         fmod.setVolume(note.fmod_channel, dav)
                         self.debug_fmod_playback('SET NOTE VOLUME', chan_id,
                                                  nid, dav)
+                    if not len(output_volume):
+                        output_volume = [0]
+                    chan.output_volume = round(
+                        sum(output_volume) / len(output_volume))
                     chan.program_ctr += 1
                 elif cmd_byte == 0xBF:
                     chan.panning = args[0]
                     panning = chan.panning * 2
                     self.show_processor_exec('SET CHANNEL PANNING', chan_id,
-                                         chan.panning)
+                                             chan.panning)
                     for nid in chan.notes.values():
                         note = self.note_arr[nid]
                         if not note.enable or note.parent != chan_id:
@@ -554,11 +616,11 @@ class Player(object):
                     if cmd_byte == 0xC0:
                         chan.pitch_bend = args[0]
                         self.show_processor_exec('SET PITCH BEND', chan_id,
-                                             chan.pitch_bend)
+                                                 chan.pitch_bend)
                     else:
                         chan.pitch_range = engine.to_int(args[0])
                         self.show_processor_exec('SET PITCH RANGE', chan_id,
-                                             chan.pitch_range)
+                                                 chan.pitch_range)
                     chan.program_ctr += 1
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
@@ -573,27 +635,25 @@ class Player(object):
                 elif cmd_byte == 0xC2:
                     chan.vib_rate = args[0]
                     self.show_processor_exec('SET VIBRATO RATE', chan_id,
-                                         chan.vib_rate)
+                                             chan.vib_rate)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xC4:
                     chan.vib_depth = args[0]
                     self.show_processor_exec('SET VIBRATO RNGE', chan_id,
-                                         chan.vib_depth)
+                                             chan.vib_depth)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xCE:
                     chan.is_sustain = False
                     self.show_processor_exec('DISABLE SUSTAIN', chan_id)
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
-                        if not note.enable or note.note_off:
-                            continue
                         self.reset_note(note)
                         self.show_processor_exec('RELEASE NOTE', chan_id, nid)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xB3:
                     chan.program_ctr = event.evt_q_ptr
                     self.show_processor_exec('DEFINE SUBROUTINE', chan_id,
-                                         chan.program_ctr)
+                                             chan.program_ctr)
                     chan.sub_ctr += 1
                     chan.rtn_ptr += 1
                     chan.in_sub = True
@@ -602,7 +662,7 @@ class Player(object):
                         chan.program_ctr = chan.rtn_ptr
                         chan.in_sub = False
                         self.show_processor_exec('END SUBROUTINE', chan_id,
-                                             chan.program_ctr)
+                                                 chan.program_ctr)
                     else:
                         self.show_processor_exec('NOP (NO OPERATION)', chan_id)
                         chan.program_ctr += 1
@@ -616,7 +676,7 @@ class Player(object):
                     chan.program_ctr = chan.loop_ptr
                     chan.is_sustain = False
                     self.show_processor_exec('JUMP TO ADDRESS', chan_id,
-                                         chan.program_ctr)
+                                             chan.program_ctr)
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
                         self.reset_note(note)
@@ -627,7 +687,8 @@ class Player(object):
                         chan.is_sustain = True
                         ll = -1
                     nn, vv, uu = args
-                    self.note_queue.append(engine.Note(nn, vv, chan_id, uu, ll, chan.patch_num))
+                    self.note_queue.append(
+                        engine.Note(nn, vv, chan_id, uu, ll, chan.patch_num))
                     self.show_processor_exec(
                         'QUEUE NEW NOTE', chan_id, f'{ll:2} ticks',
                         engine.to_name(nn), f'VOL: {vv:3}', f'UNK: {uu:3}')
@@ -643,10 +704,19 @@ class Player(object):
                         chan.wait_ticks = n_event_queue.ticks - event.ticks
                     else:
                         chan.wait_ticks = n_event_queue.ticks
-                    self.show_processor_exec(f'TIMEOUT {chan.wait_ticks} TICKS', chan_id)
+                    self.show_processor_exec(f'TIMEOUT {chan.wait_ticks} TICKS',
+                                             chan_id)
+                elif cmd_byte == 0xCD:
+                    if args[0] == 0x08:
+                        self.show_processor_exec('SET PSEUDO ECHO VOLUME',
+                                                 chan_id)
+                    elif args[0] == 0x09:
+                        self.show_processor_exec('SET PSEUDO ECHO LENGTH',
+                                                 chan_id)
+                    chan.program_ctr += 1
                 else:
                     self.show_processor_exec('UNKNOWN OP CODE', chan_id,
-                                         f'{cmd_byte:x}')
+                                             f'{cmd_byte:x}')
                     chan.program_ctr += 1
 
     def set_note(self, note: engine.Note, direct: engine.Direct):
@@ -727,7 +797,8 @@ class Player(object):
             elif direct.output == engine.DirectTypes.NOISE:
                 sample_id = f'noise{direct.gb1 % 2}{int(random.random() * 10)}'
                 base_freq = engine.to_frequency(direct.drum_key)
-        self.show_processor_exec(note.output.name.upper(), note.parent, f'SMP: {sample_id}', f'{base_freq} Hz')
+        self.show_processor_exec(note.output.name.upper(), note.parent,
+                                 f'SMP: {sample_id}', f'{base_freq} Hz')
 
         return sample_id, base_freq
 
@@ -744,6 +815,7 @@ class Player(object):
         note is played by the FMOD player.
 
         """
+        volumes = [[] for i in range(len(self.channels))]
         for item in self.note_queue:
             note_num = self.free_note()
             if note_num is None:
@@ -755,16 +827,16 @@ class Player(object):
 
             for note_id in chan.notes.values():
                 note = self.note_arr[note_id]
-                if note.enable is True and note.note_off is False:
-                    if note.wait_ticks == -1 and chan.is_sustain is False:
+
+                if note.enable is True and not note.note_off:
+                    if note.wait_ticks == -1 and not chan.is_sustain:
                         self.reset_note(note)
-                        self.show_processor_exec('SUSTAIN NOTE OFF', item.parent,
-                                             note_id)
+                        self.show_processor_exec('SUSTAIN NOTE OFF',
+                                                 item.parent, note_id)
                     elif note.wait_ticks in (0, 1):
                         self.reset_note(note)
-                        self.show_processor_exec('TIMEOUT NOTE OFF', item.parent,
-                                             note_id)
-
+                        self.show_processor_exec('TIMEOUT NOTE OFF',
+                                                 item.parent, note_id)
             chan.notes[note_num] = note_num
             if self.note_arr[note_num].note_num not in chan.notes_playing:
                 chan.notes_playing.append(self.note_arr[note_num].note_num)
@@ -779,7 +851,8 @@ class Player(object):
             if psg_note is not None:
                 gb_note = self.note_arr[psg_note]
                 fmod.stopSound(gb_note.fmod_channel)
-                self.debug_fmod_playback(f'STOP {out_type.name}', item.parent, psg_note)
+                self.debug_fmod_playback(f'STOP {out_type.name}', item.parent,
+                                         psg_note)
                 gb_note.fmod_channel = 0
                 del self.channels[gb_note.parent].notes[psg_note]
                 gb_note.enable = False
@@ -789,7 +862,7 @@ class Player(object):
             out_frequency = int(frequency * math.pow(BASE, pitch))
             panning = chan.panning * 2
             volume = 0 if chan.is_muted else int(dav)
-            chan.output_volume = volume
+            volumes[item.parent].append(volume)
             note: engine.Note = self.note_arr[note_num]
             note.frequency = frequency
             note.phase = engine.NotePhases.INITIAL
@@ -799,11 +872,6 @@ class Player(object):
             note.fmod_channel = fmod.playSound(
                 note_num, self.samples[sample_id].fmod_smp, None, True)
             self.debug_fmod_playback('PLAY NOTE', note.parent, note_num)
-            note.fmod_fx = fmod.enableFX(-3, 3)
-            self.debug_fmod_playback('ENABLE FX', note.parent, note_num)
-            fmod.setEcho(note.fmod_fx, 0.0, 0.0, 500.0, 500.0, False)
-            self.debug_fmod_playback('SET ECHO', note.parent, note_num,
-                                     f'{500} ms')
             fmod.setFrequency(note.fmod_channel, out_frequency)
             self.debug_fmod_playback('SET FREQUENCY', note.parent, note_num,
                                      f'{out_frequency} Hz')
@@ -814,6 +882,8 @@ class Player(object):
             self.debug_fmod_playback('SET PANNING', note.parent, note_num)
             fmod.setPaused(note.fmod_channel, False)
             self.debug_fmod_playback('UNPAUSE NOTE', note.parent, note_num)
+        for chan_id, vol in enumerate(map(self.get_output_volume, volumes)):
+            self.channels[chan_id].output_volume = vol
         self.note_queue.clear()
 
     def update_notes(self) -> None:
@@ -849,98 +919,83 @@ class Player(object):
             INT((VELOCITY / 0x7F) *  (CHANNEL_VOL / 0x7F) * (POS / 0xFF) * 255)
 
         """
-        for note_id, note in enumerate(self.note_arr):
+        for channel in self.channels:
+            volumes = []
+            for note_id in channel.notes.copy():
+                note = self.note_arr[note_id]
 
-            if not note.enable:
-                continue
+                if not note.enable:
+                    continue
 
-            channel = self.channels[note.parent]
-            if note.note_off and note.phase < engine.NotePhases.RELEASE:
-                note.env_step = 0
-                note.phase = engine.NotePhases.RELEASE
+                channel = self.channels[note.parent]
+                if note.note_off and note.phase < engine.NotePhases.RELEASE:
+                    note.env_step = 0
+                    note.phase = engine.NotePhases.RELEASE
 
-            if note.env_step == 0 or (note.env_pos == note.env_dest) or (
-                    note.env_step <= 0 and note.env_pos <= note.env_dest) or (
-                        note.env_step >= 0 and note.env_pos >= note.env_dest):
-                if note.output == engine.NoteTypes.DIRECT:
-                    if note.phase == engine.NotePhases.INITIAL:
+                if note.env_step == 0 or (note.env_pos == note.env_dest) or (
+                        note.env_step <= 0 and note.env_pos <= note.env_dest
+                ) or (note.env_step >= 0 and note.env_pos >= note.env_dest):
+                    output, phase = note.output, note.phase
+                    if phase == engine.NotePhases.INITIAL:
                         note.phase = engine.NotePhases.ATTACK
                         note.env_pos = 0
                         note.env_dest = 255
                         note.env_step = note.env_atck
-                    elif note.phase == engine.NotePhases.ATTACK:
+                        if output > engine.NoteTypes.DIRECT:
+                            note.env_step *= 8
+                    elif phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
                         note.env_dest = note.env_sus
-                        note.env_step = (note.env_dcy - 0xFF) / 2
-                    elif note.phase in (engine.NotePhases.DECAY,
-                                        engine.NotePhases.SUSTAIN):
+                        if output > engine.NoteTypes.DIRECT:
+                            note.env_dest *= 8
+                            note.env_step = (note.env_dcy - 0x08) * 16
+                        else:
+                            note.env_step = (note.env_dcy - 0x100) / 2
+                    elif phase == engine.NotePhases.DECAY:
                         note.phase = engine.NotePhases.SUSTAIN
                         note.env_step = 0
-                    elif note.phase == engine.NotePhases.RELEASE:
+                    elif phase == engine.NotePhases.SUSTAIN:
+                        note.env_step = 0
+                    elif phase == engine.NotePhases.RELEASE:
                         note.phase = engine.NotePhases.NOTEOFF
                         note.env_dest = 0
-                        note.env_step = (note.env_rel - 0xFF)
-                    elif note.phase == engine.NotePhases.NOTEOFF:
-                        fmod.setPaused(note.fmod_channel, True)
-                        fmod.disableFX(note.fmod_channel)
-                        self.debug_fmod_playback('DISABLE FX', note.parent,
-                                                 note_id)
+                        if output > engine.NoteTypes.DIRECT:
+                            note.env_step = (note.env_rel - 0x08) * 8
+                        else:
+                            note.env_step = (note.env_rel - 0x100)
+                    elif phase == engine.NotePhases.NOTEOFF:
+                        if output > engine.NoteTypes.DIRECT:
+                            self.psg_channels[note.output] = None
+                        self.reset_note(note)
                         fmod.stopSound(note.fmod_channel)
                         self.debug_fmod_playback('STOP NOTE', note.parent,
                                                  note_id,
                                                  f'FCHAN: {note.fmod_channel}')
                         note.fmod_channel = 0
                         del channel.notes[note_id]
+                        if note.note_num in channel.notes_playing:
+                            channel.notes_playing.remove(note.note_num)
                         note.enable = False
+
+                delta_pos = note.env_pos + note.env_step
+                if delta_pos > note.env_dest and note.env_step > 0 or delta_pos < note.env_dest and note.env_step < 0:
+                    delta_pos = note.env_dest
+                note.env_pos = delta_pos
+
+                if not channel.is_muted:
+                    vel = note.velocity / 0x7F
+                    vol = channel.main_vol / 0x7F
+                    pos = note.env_pos / 0xFF
+                    volume = round(vel * vol * pos * 255)
+                    volumes.append(volume)
                 else:
-                    if note.phase == engine.NotePhases.INITIAL:
-                        note.phase = engine.NotePhases.ATTACK
-                        note.env_pos = 0
-                        note.env_dest = 255
-                        note.env_step = note.env_atck * 16
-                    elif note.phase == engine.NotePhases.ATTACK:
-                        note.phase = engine.NotePhases.DECAY
-                        note.env_dest = (note.env_sus) * 16
-                        note.env_step = -(0x8 - note.env_dcy) * 8
-                    elif note.phase in (engine.NotePhases.DECAY,
-                                        engine.NotePhases.SUSTAIN):
-                        note.phase = engine.NotePhases.SUSTAIN
-                        note.env_step = 0
-                    elif note.phase == engine.NotePhases.RELEASE:
-                        note.phase = engine.NotePhases.NOTEOFF
-                        note.env_dest = 0
-                        note.env_step = -(0x8 - note.env_rel) * 8
-                    elif note.phase == engine.NotePhases.NOTEOFF:
-                        assert note.output in self.psg_channels
-                        self.psg_channels[note.output] = None
-                        fmod.setPaused(note.fmod_channel, True)
-                        fmod.disableFX(note.fmod_channel)
-                        self.debug_fmod_playback('DISABLE FX', note.parent,
-                                                 note_id)
-                        fmod.stopSound(note.fmod_channel)
-                        self.debug_fmod_playback('STOP NOTE', note.parent,
-                                                 note_id, note.fmod_channel)
-                        note.fmod_channel = 0
-                        del channel.notes[note_id]
-                        note.enable = False
+                    volume = 0
 
-            delta_pos = note.env_pos + note.env_step
-            if delta_pos > note.env_dest and note.env_step > 0 or delta_pos < note.env_dest and note.env_step < 0:
-                delta_pos = note.env_dest
-            note.env_pos = delta_pos
+                fmod.setVolume(note.fmod_channel, volume)
+                self.debug_fmod_playback('SET NOTE VOLUME', note.parent,
+                                         note_id, volume)
 
-            if not channel.is_muted:
-                vel = note.velocity / 0x7F
-                vol = channel.main_vol / 0x7F
-                pos = note.env_pos / 0xFF
-                volume = round(vel * vol * pos * 255)
-            else:
-                volume = 0
-
-            channel.output_volume = volume
-            fmod.setVolume(note.fmod_channel, volume)
-            self.debug_fmod_playback('SET NOTE VOLUME', note.parent, note_id,
-                                     volume)
+            channel.output_volume = self.get_output_volume(volumes)
 
     def update_processor(self) -> int:
         """Execute one tick of the event processor.
@@ -970,6 +1025,12 @@ class Player(object):
         fmod.systemClose()
         return 0
 
+    def get_output_volume(self, volumes: typing.List[int]) -> int:
+        l = len(volumes)
+        if not len(volumes):
+            l = 1
+        return round(sum(volumes) / l)
+
     def get_player_header(self, meta_data: parser.MetaData,
                           channel_queue: typing.List) -> str:
         """Construct the interface header.
@@ -985,20 +1046,32 @@ class Player(object):
 
         """
         self.update_channels()
-
-        name = f'ROM: {meta_data.rom_name}'
-        code = f'CODE: {meta_data.code}'
-        info = ''.join([name, '\n', code, '\n'])
+        sappy_top = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>7}{DOWN_AND_LEFT}'
+        sappy = f'{VERTICAL} SAPPY {VERTICAL}'
+        sappy_bottom = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>7}{UP_AND_LEFT}'
+        header_top = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>16}{DOWN_AND_LEFT}'
+        header = f'{VERTICAL} {meta_data.rom_name:^14} {VERTICAL}'
+        top = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>16}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>14}{DOWN_AND_LEFT}'
+        table_ptr = f'{VERTICAL} TABLE POINTER: {VERTICAL} {"0x":>4}{meta_data.song_ptr:0>8x} {VERTICAL}'
+        song_ptr = f'{VERTICAL}  SONG POINTER: {VERTICAL} {"0x":>4}{meta_data.voice_ptr:0>8x} {VERTICAL}'
+        voice_ptr = f'{VERTICAL} VOICE POINTER: {VERTICAL} {"0x":>4}{meta_data.header_ptr:0>8x} {VERTICAL}'
+        code = f'{VERTICAL}          CODE: {VERTICAL} {meta_data.code} {VERTICAL}'
+        bottom = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>14}{UP_AND_LEFT}'
+        info = '\n'.join((sappy_top, sappy, sappy_bottom, header_top, header, top, table_ptr, song_ptr, code, bottom))+'\n'
         header = []
         for chan_id, chan in enumerate(channel_queue):
             header.append(
-                f'| CHAN{chan_id:<2}{chan.output_type.name:>{self.WIDTH - 8}} ')
-        header.append('| TEMPO |')
+                f'{VERTICAL} CHAN{chan_id:<2}{chan.output_type.name:>{self.WIDTH - 8}} '
+            )
+        header.append(f'{VERTICAL} TEMPO {VERTICAL}')
         header = ''.join(header)
 
-        seperator = '+' + '+'.join(
-            [f'{"":->{self.WIDTH}}'] * len(self.channels)) + '+-------+'
-        return info + seperator + '\n' + header + '\n' + seperator
+        seperator = [f'{"":{HORIZONTAL}>{self.WIDTH}}'] * len(self.channels)
+        top_seperator = DOWN_AND_RIGHT + DOWN_AND_HORIZONTAL.join(
+            seperator) + TEMPO_TOP
+        bot_seperator = VERTICAL_AND_RIGHT + VERTICAL_AND_HORIZONTAL.join(
+            seperator) + TEMPO_BOTTOM
+        return info + top_seperator + '\n' + header + '\n' + bot_seperator
 
     def display(self) -> None:
         """Update and display the interface."""
@@ -1027,8 +1100,15 @@ class Player(object):
         for chan in self.channels:
             chan: engine.Channel
 
-            volume = round(chan.output_volume / (512 / (self.WIDTH - 1)))
-            column = f'{"":=>{volume}}'
+            volume, end_bar = divmod(chan.output_volume,
+                                     512 // (self.WIDTH - 1))
+            #print(volume, end_bar)
+            if not end_bar:
+                end_bar = ''
+            else:
+                end_bar = BLOCK_TABLE.get(8 - (end_bar // 2), '')
+            volume_bar = f'{"":{FULL_BLOCK}>{volume}}'
+            column = f'{volume_bar}{end_bar}'
 
             notes = []
             for note in map(engine.to_name, chan.notes_playing):
@@ -1036,16 +1116,14 @@ class Player(object):
             notes.append(f'{chan.wait_ticks:^3}')
             notes = ''.join(notes)
 
-            column = list(f'{column + "|" + column:^{self.WIDTH}}')
-
-            volume = str(chan.output_volume)
-            column[1:len(volume) + 1] = volume
+            column = list(f'{column}{" ":<{self.WIDTH - len(column)}}')
+            column[self.WIDTH // 2] = '|'
 
             insert_pt = self.WIDTH - len(notes)
             column[insert_pt:] = notes
 
             insert_pt = round(chan.panning / (128 / (self.WIDTH - 1)))
-            column[insert_pt] = ':'
+            column[insert_pt] = chr(0x2573)
 
             column = ''.join(column)
             lines.append(f'{column:^{self.WIDTH - 1}}')
@@ -1054,10 +1132,11 @@ class Player(object):
         for line in lines:
             out.append(f'{line:{self.WIDTH - 1}}')
         out.append('')
-        out = f'{"|".join(out)}{self.tempo:>5}  |'
+        out = f'{VERTICAL.join(out)} {self.tempo:{" "}^5} {VERTICAL}'
         return out
 
-    def play_song(self, fpath: str, song_num: int, song_table: int) -> None:
+    def play_song(self, fpath: str, song_num: int,
+                  song_table: int = None) -> None:
         """Play a song in the specified ROM."""
         d = parser.Parser()
         song = d.get_song(fpath, song_num, song_table)
@@ -1066,6 +1145,9 @@ class Player(object):
             return
         elif song == -2:
             print('Invalid song number.')
+            return
+        elif song == -3:
+            print('Empty track.')
             return
         self.reset_player()
         self.channels = song.channels
@@ -1104,13 +1186,20 @@ class Player(object):
         r = round
         t = time.time
         d = self.display
-        while True:
-            st = t()
-            if e() is None or d():
-                break
-            if r(f((1/self.tempo*2.5 - (t() - st)) * 1000) / 1000, 3) < 0:
-                continue
-            s(r(f((1/self.tempo*2.5 - (t() - st)) * 1000) / 1000, 3))
+        try:
+            while True:
+                st = t()
+                if not e() or d():
+                    break
+                if r(f((1 / self.tempo * 2.5 - (t() - st)) * 1000) / 1000, 3) < 0:
+                    continue
+                s(r(f((1 / self.tempo * 2.5 - (t() - st)) * 1000) / 1000, 3))
+        except KeyboardInterrupt:
+            sys.stdout.write('\n')
+            seperator = [f'{"":{HORIZONTAL}>{self.WIDTH}}'] * len(self.channels)
+            exit_str = UP_AND_RIGHT + UP_AND_HORIZONTAL.join(seperator) + f'{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{UP_AND_LEFT}'
+            sys.stdout.write(exit_str+'\n'+'Exiting...\n')
+            return
 
     def stop_song(self):
         """Stop playback and reset the player."""
@@ -1119,8 +1208,5 @@ class Player(object):
 
     def reset_note(self, note: engine.Note):
         """Revert a note to default state and remove it from the interface."""
-        chan = self.channels[note.parent]
-        if note.note_num in chan.notes_playing:
-            chan.notes_playing.remove(note.note_num)
         note.note_off = True
         note.vib_pos = 0.0

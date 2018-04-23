@@ -25,13 +25,7 @@ def main():
 
     player.WIDTH = width
 
-    try:
-        player.play_song(args.path, args.song_num, song_table)
-
-    except KeyboardInterrupt:
-        print("Exiting...")
-        player.stop_song()
-        exit(0)
+    player.play_song(args.path, args.song_num, song_table)
 
 
 if __name__ == "__main__":

@@ -31,6 +31,7 @@ class MetaData(typing.NamedTuple):
     priority: int = ...
     header_ptr: int = ...
     voice_ptr: int = ...
+    song_ptr: int = ...
     unknown: int = ...
 
     @property
@@ -113,13 +114,11 @@ class Parser(object):
             size = smp_head.size
             frequency = smp_head.frequency * 64
             loop_start = smp_head.loop
-            loop = smp_head.flags > 0
+            loop = smp_head.flags == 0x40
             gb_wave = False
-            if use_readstr:
-                smp_data = self.file.rd_str(smp_head.size)
-            else:
-                smp_data = self.file._file.tell()
+            smp_data = self.file._file.tell()
         else:
+            print('hi')
             size = 32
             frequency = self.GB_WAV_BASE_FREQ
             loop_start = 0
@@ -369,7 +368,7 @@ class Parser(object):
             song.channels.append(channel)
         return song
 
-    def get_song(self, fpath: str, sng_num: int, sng_list_ptr: int = None) -> Song:
+    def get_song(self, fpath: str, song_num: int, song_list_ptr: int = None) -> Song:
         """Load a song from ROM into memory.
 
         Loads all samples within the song's voice table and assigns them to
@@ -377,14 +376,20 @@ class Parser(object):
         uses into an event queue for playback processing. Is repeatable.
         """
         self.file = fileio.open_file(fpath)
-        if sng_list_ptr is None:
-            sng_list_ptr = self.file.get_song_table_ptr()
-            if sng_list_ptr is None:
+
+        if song_list_ptr is None:
+            song_list_ptr = self.file.get_song_table_ptr(song_num)
+            if song_list_ptr == -1:
                 return -1
-        header_ptr = self.file.rd_gba_ptr(sng_list_ptr + sng_num * 8)
+        header_ptr = self.file.rd_gba_ptr(song_list_ptr + song_num * 8)
+
         if header_ptr == -1:
             return -2
+
         num_tracks = self.file.rd_byte(header_ptr)
+        if num_tracks == 0:
+            return -3
+
         unk = self.file.rd_byte()
         priority = self.file.rd_byte()
         echo = self.file.rd_byte()
@@ -401,5 +406,7 @@ class Parser(object):
             priority=priority,
             header_ptr=header_ptr,
             voice_ptr=inst_table_ptr,
+            song_ptr=song_list_ptr,
             unknown=unk)
+
         return song
