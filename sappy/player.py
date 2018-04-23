@@ -118,7 +118,10 @@ class Player(object):
     SHOW_PROCESSOR_EXECUTION = False
     SHOW_FMOD_EXECUTION = False
     DISPLAY_NOTES = False
-    INSTRUCTIONS_PER_CYCLE = 24
+
+    INSTRUCTIONS_PER_CYCLE = 2.5
+    INSTRUCTIONS_PER_ = 24
+
     GB_SQ_MULTI = .5
     WIDTH = 33
 
@@ -735,8 +738,8 @@ class Player(object):
         base_freq = 0
         standard = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
         square = (engine.DirectTypes.SQUARE1, engine.DirectTypes.SQUARE2)
-        if patch in self.directs:
-            direct: engine.Direct = self.directs[patch]
+        direct = self.directs.get(patch)
+        if direct is not None:
             self.set_note(note, direct)
             self.show_processor_exec(
                 'NEW DIRECT NOTE', note.parent, note_num,
@@ -995,7 +998,7 @@ class Player(object):
                 self.debug_fmod_playback('SET NOTE VOLUME', note.parent,
                                          note_id, volume)
 
-            channel.output_volume = self.get_output_volume(volumes)
+                channel.output_volume = self.get_output_volume(volumes)
 
     def update_processor(self) -> int:
         """Execute one tick of the event processor.
@@ -1100,19 +1103,19 @@ class Player(object):
         for chan in self.channels:
             chan: engine.Channel
 
-            volume, end_bar = divmod(chan.output_volume,
-                                     512 // (self.WIDTH - 1))
-            #print(volume, end_bar)
-            if not end_bar:
-                end_bar = ''
+            base, end = divmod(chan.output_volume, 256 // self.WIDTH)
+            if not end:
+                end = ''
             else:
-                end_bar = BLOCK_TABLE.get(8 - (end_bar // 2), '')
-            volume_bar = f'{"":{FULL_BLOCK}>{volume}}'
-            column = f'{volume_bar}{end_bar}'
+                incr = 256 / self.WIDTH / 8
+                end = BLOCK_TABLE.get(8-(end//incr), '')
+            vol_bar = f'{"":{FULL_BLOCK}>{base}}'
+            column = f'{vol_bar}{end}'
 
             notes = []
             for note in map(engine.to_name, chan.notes_playing):
                 notes.append(f'{note:^4}')
+            notes = notes[:self.WIDTH//4-1]
             notes.append(f'{chan.wait_ticks:^3}')
             notes = ''.join(notes)
 
@@ -1186,14 +1189,15 @@ class Player(object):
         r = round
         t = time.time
         d = self.display
+        m = self.INSTRUCTIONS_PER_CYCLE
         try:
             while True:
                 st = t()
                 if not e() or d():
                     break
-                if r(f((1 / self.tempo * 2.5 - (t() - st)) * 1000) / 1000, 3) < 0:
+                if r(f((1 / self.tempo * m - (t() - st)) * 1000) / 1000, 3) < 0:
                     continue
-                s(r(f((1 / self.tempo * 2.5 - (t() - st)) * 1000) / 1000, 3))
+                s(r(f((1 / self.tempo * m - (t() - st)) * 1000) / 1000, 3))
         except KeyboardInterrupt:
             sys.stdout.write('\n')
             seperator = [f'{"":{HORIZONTAL}>{self.WIDTH}}'] * len(self.channels)

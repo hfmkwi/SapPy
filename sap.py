@@ -12,8 +12,8 @@ def main():
     p.add_argument('--song_table', help="address of song table in rom", default=None)
     p.add_argument('--width', type=int, help='width of a channel column', default=33)
     args = p.parse_args()
-    if args.width < 17:
-        width = 17
+    if args.width < 15:
+        width = 15
     else:
         width = args.width
     if args.song_table is not None:
