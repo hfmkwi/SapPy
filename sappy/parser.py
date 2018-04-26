@@ -51,7 +51,7 @@ class MetaData(typing.NamedTuple):
         The region code is determined by the 4th character in the game's ID.
 
         """
-        return self.REGION.get(self.rom_code[3])
+        return self.REGION.get(self.rom_code[3], 'UNK')
 
 
 class Song(object):
@@ -69,8 +69,8 @@ class Song(object):
 class Parser(object):
     """Parser/interpreter for Sappy code."""
 
-    GB_WAV_MULTI = 0.5
-    GB_WAV_BASE_FREQ = 880
+    GB_WAV_MULTI = 0.5 / 2
+    GB_WAV_BASE_FREQ = 8372
 
     def __init__(self):
         """Initialize all data containers for relevant channel and sample data."""
@@ -118,7 +118,6 @@ class Parser(object):
             gb_wave = False
             smp_data = self.file._file.tell()
         else:
-            print('hi')
             size = 32
             frequency = self.GB_WAV_BASE_FREQ
             loop_start = 0
@@ -129,11 +128,8 @@ class Parser(object):
             for ai in range(32):
                 bi = ai % 2
                 l = int(ai / 2)
-                if tsi[l] == '':
-                    data = 0
-                else:
-                    data = ord(tsi[l])
-                data //= 16**bi
+                data = ord(tsi[l])
+                data /= 16**bi
                 data %= 16
                 data *= self.GB_WAV_MULTI * 16
                 char = chr(int(data))

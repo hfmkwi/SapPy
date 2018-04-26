@@ -199,7 +199,7 @@ class VirtualFile(object):
 
     @address.setter
     def address(self, addr: int) -> None:
-        if addr is not None and addr < self.size:
+        if addr is not None and addr < self.size and addr >= 0:
             self._address = addr
             self._file.seek(self._address)
 
@@ -289,7 +289,8 @@ class VirtualFile(object):
 
         """
         self.address = addr
-        return self._file.read(length).decode()
+        out = ''.join(map(chr, memoryview(self._file.read(length))))
+        return out
 
     def rd_gba_ptr(self, addr: int = None) -> int:
         """Read a stream of int as an AGB rom pointer.
@@ -465,33 +466,21 @@ class VirtualFile(object):
 
     def get_song_table_ptr(self, track: int) -> None:
         DEFAULT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801))
-        MT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680B_1909, 0x1C18_6801))
+        MT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0051_8882, 0x0089_1889, 0x680A_18C9, 0x1C10_6801))
         ZM_CODE_TABLE = array.array('I', (0x4008_2002, 0xD002_2800, 0x4282_6918, 0x1C20_D003, 0xF001_2100))
-        GENERIC_CODE_TABLE = (DEFAULT_CODE_TABLE, ZM_CODE_TABLE)
+        GENERIC_CODE_TABLE = (DEFAULT_CODE_TABLE, ZM_CODE_TABLE, MT_CODE_TABLE)
         END_CODE = 0x4700_BC01
+        SONG_PTR_OFFSET = 8
         END_CODE_OFFSET = 6
         CODE_TABLE_OFFSET = 5
-        OFFSET = 0
-        GAME_CODE = self.rd_str(4, 0xAC)
-        if GAME_CODE[1:3] == 'MT':
-            OFFSET = 2
-
-        self._file.seek(0)
         thumb_codes = array.array('I')
         thumb_codes.fromfile(self._file, self.size // thumb_codes.itemsize)
         for code_ind in range(len(thumb_codes) - END_CODE_OFFSET):
             l_part = thumb_codes[code_ind:code_ind+CODE_TABLE_OFFSET]
-            if any(l_part == table for table in GENERIC_CODE_TABLE):
-                pass
-            elif l_part == MT_CODE_TABLE:
-                thumb_codes = array.array('I')
-                self._file.seek(OFFSET)
-                thumb_codes.fromfile(self._file, self.size // thumb_codes.itemsize)
-            else:
-                continue
+            l_match = any(l_part == table for table in GENERIC_CODE_TABLE)
             r_match = thumb_codes[code_ind+END_CODE_OFFSET] == END_CODE
-            if r_match:
-                ptr = gba_ptr_to_addr(thumb_codes[code_ind+8])
+            if l_match and r_match:
+                ptr = gba_ptr_to_addr(thumb_codes[code_ind+SONG_PTR_OFFSET])
                 if self.rd_gba_ptr(ptr + track * 8) > self.size:
                     code_ind -= 7
                     continue

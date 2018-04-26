@@ -10,10 +10,10 @@ def main():
     p.add_argument('path', help="path to the ROM to play")
     p.add_argument('song_num', type=int)
     p.add_argument('--song_table', help="address of song table in rom", default=None)
-    p.add_argument('--width', type=int, help='width of a channel column', default=33)
+    p.add_argument('--width', type=int, help='width of a channel column', default=16)
     args = p.parse_args()
-    if args.width < 15:
-        width = 15
+    if args.width < 16:
+        width = 16
     else:
         width = args.width
     if args.song_table is not None:

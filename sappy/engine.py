@@ -80,7 +80,7 @@ class ChannelTypes(enum.IntEnum):
     DIRECT = 0
     SQUARE1 = 1
     SQUARE2 = 2
-    WAVE = 3
+    WAVEFORM = 3
     NOISE = 4
     UNK5 = 5
     UNK6 = 6
@@ -178,7 +178,6 @@ class Channel(Type):
         self.vib_depth: int = 0
         self.vib_rate: int = 0
         self.output_volume: int = 0
-        self.notes_playing: list = []
         self.key: str = ''
         self.output_type: ChannelTypes = ChannelTypes.DIRECT
         self.event_queue: typing.List = []

@@ -119,8 +119,7 @@ class Player(object):
     SHOW_FMOD_EXECUTION = False
     DISPLAY_NOTES = False
 
-    INSTRUCTIONS_PER_CYCLE = 2.5
-    INSTRUCTIONS_PER_ = 24
+    PLAYBACK_RATE = 1
 
     GB_SQ_MULTI = .5
     WIDTH = 33
@@ -379,12 +378,22 @@ class Player(object):
         for sample in sample_pool.values():
             sample: engine.Sample
             if sample.gb_wave:
-                sample.fmod_smp = self.load_sample(file_path, sample.smp_data,
+                if type(sample.smp_data) == str:
+                    with open('temp.raw', 'w') as f:
+                        f.write(sample.smp_data)
+                    sample.fmod_smp = self.load_sample('temp.raw', 0, sample.size)
+                else:
+                    sample.fmod_smp = self.load_sample(file_path, sample.smp_data,
                                                    sample.size)
                 fmod.setLoopPoints(sample.fmod_smp, 0, 31)
             else:
-                sample.fmod_smp = self.load_sample(
-                    file_path, sample.smp_data, sample.size, sample.loop, False)
+                if type(sample.smp_data) == str:
+                    with open('temp.raw', 'w') as f:
+                        f.write(sample.smp_data)
+                    sample.fmod_smp = self.load_sample('temp.raw', 0, sample.size, sample.loop, False)
+                else:
+                    sample.fmod_smp = self.load_sample(
+                        file_path, sample.smp_data, sample.size, sample.loop, False)
                 fmod.setLoopPoints(sample.fmod_smp, sample.loop_start,
                                    sample.size - 1)
 
@@ -508,7 +517,7 @@ class Player(object):
             if not note.enable:
                 continue
             chan = self.channels[note.parent]
-            if not chan.is_enabled or chan.vib_rate == 0 or chan.vib_depth == 0:
+            if not chan.is_enabled or chan.vib_rate == 0 and chan.vib_depth == 0:
                 continue
 
             delta_freq = math.sin(math.pi * note.vib_pos) * chan.vib_depth
@@ -527,7 +536,7 @@ class Player(object):
             if note.wait_ticks > 0:
                 note.wait_ticks -= 1
             if note.wait_ticks <= 0 and not note.note_off:
-                if not self.channels[note.parent].is_sustain:
+                if not self.channels[note.parent].is_sustain or note.wait_ticks == 0:
                     self.reset_note(note)
 
     def update_channels(self) -> None:
@@ -579,9 +588,9 @@ class Player(object):
                                              chan.output_type.name)
                     chan.program_ctr += 1
                 elif cmd_byte == 0xBE:
-                    chan.main_vol = args[0]
+                    chan.main_volume = args[0]
                     self.show_processor_exec('SET CHANNEL VOLUME', chan_id,
-                                             chan.main_vol)
+                                             chan.main_volume)
                     output_volume = []
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
@@ -590,7 +599,7 @@ class Player(object):
                         dav = 0
                         if not chan.is_muted:
                             vel = note.velocity / 0x7F
-                            vol = chan.main_vol / 0x7F
+                            vol = chan.main_volume / 0x7F
                             pos = note.env_pos / 0xFF
                             dav = round(vel * vol * pos * 255)
                         output_volume.append(dav)
@@ -686,6 +695,7 @@ class Player(object):
                         self.show_processor_exec('RELEASE NOTE', chan_id, nid)
                 elif cmd_byte >= 0xCF:
                     ll = engine.to_ticks(cmd_byte - 0xCF) + 1
+                    chan.is_sustain = False
                     if cmd_byte == 0xCF:
                         chan.is_sustain = True
                         ll = -1
@@ -738,8 +748,8 @@ class Player(object):
         base_freq = 0
         standard = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
         square = (engine.DirectTypes.SQUARE1, engine.DirectTypes.SQUARE2)
-        direct = self.directs.get(patch)
-        if direct is not None:
+        if patch in self.directs:
+            direct = self.directs[patch]
             self.set_note(note, direct)
             self.show_processor_exec(
                 'NEW DIRECT NOTE', note.parent, note_num,
@@ -831,8 +841,8 @@ class Player(object):
             for note_id in chan.notes.values():
                 note = self.note_arr[note_id]
 
-                if note.enable is True and not note.note_off:
-                    if note.wait_ticks == -1 and not chan.is_sustain:
+                if note.enable and not note.note_off:
+                    if note.wait_ticks <= 0 and not chan.is_sustain:
                         self.reset_note(note)
                         self.show_processor_exec('SUSTAIN NOTE OFF',
                                                  item.parent, note_id)
@@ -841,13 +851,11 @@ class Player(object):
                         self.show_processor_exec('TIMEOUT NOTE OFF',
                                                  item.parent, note_id)
             chan.notes[note_num] = note_num
-            if self.note_arr[note_num].note_num not in chan.notes_playing:
-                chan.notes_playing.append(self.note_arr[note_num].note_num)
             sample_id, frequency = self.get_playback_data(item)
             if not sample_id:
                 return
             frequency *= math.pow(BASE, self.transpose)
-            dav = (item.velocity / 0x7F) * (chan.main_vol / 0x7F) * 255
+            dav = (item.velocity / 0x7F) * (chan.main_volume / 0x7F) * 255
             out_type = self.note_arr[note_num].output
 
             psg_note = self.psg_channels.get(out_type)
@@ -869,8 +877,6 @@ class Player(object):
             note: engine.Note = self.note_arr[note_num]
             note.frequency = frequency
             note.phase = engine.NotePhases.INITIAL
-            if note.output == engine.NoteTypes.NOISE:
-                continue
 
             note.fmod_channel = fmod.playSound(
                 note_num, self.samples[sample_id].fmod_smp, None, True)
@@ -945,13 +951,14 @@ class Player(object):
                         note.env_dest = 255
                         note.env_step = note.env_atck
                         if output > engine.NoteTypes.DIRECT:
-                            note.env_step *= 8
+                            note.env_dest = 255 * self.GB_SQ_MULTI
+                            note.env_step *= 8 * (note.velocity / 0x7F)
                     elif phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
                         note.env_dest = note.env_sus
                         if output > engine.NoteTypes.DIRECT:
-                            note.env_dest *= 8
-                            note.env_step = (note.env_dcy - 0x08) * 16
+                            note.env_dest *= 8 * (note.velocity / 0x7F)
+                            note.env_step = (note.env_dcy - 0x08) * 8 * (note.velocity / 0x7F)
                         else:
                             note.env_step = (note.env_dcy - 0x100) / 2
                     elif phase == engine.NotePhases.DECAY:
@@ -963,7 +970,7 @@ class Player(object):
                         note.phase = engine.NotePhases.NOTEOFF
                         note.env_dest = 0
                         if output > engine.NoteTypes.DIRECT:
-                            note.env_step = (note.env_rel - 0x08) * 8
+                            note.env_step = (note.env_rel - 0x08) * 8 * (note.velocity / 0x7F)
                         else:
                             note.env_step = (note.env_rel - 0x100)
                     elif phase == engine.NotePhases.NOTEOFF:
@@ -976,8 +983,6 @@ class Player(object):
                                                  f'FCHAN: {note.fmod_channel}')
                         note.fmod_channel = 0
                         del channel.notes[note_id]
-                        if note.note_num in channel.notes_playing:
-                            channel.notes_playing.remove(note.note_num)
                         note.enable = False
 
                 delta_pos = note.env_pos + note.env_step
@@ -987,7 +992,7 @@ class Player(object):
 
                 if not channel.is_muted:
                     vel = note.velocity / 0x7F
-                    vol = channel.main_vol / 0x7F
+                    vol = channel.main_volume / 0x7F
                     pos = note.env_pos / 0xFF
                     volume = round(vel * vol * pos * 255)
                     volumes.append(volume)
@@ -1081,6 +1086,7 @@ class Player(object):
         out = self.update_interface()
         sys.stdout.write(out + '\r')
         sys.stdout.flush()
+        return 0
 
     def update_interface(self) -> str:
         """Update the user interface with the player data.
@@ -1103,7 +1109,7 @@ class Player(object):
         for chan in self.channels:
             chan: engine.Channel
 
-            base, end = divmod(chan.output_volume, 256 // self.WIDTH)
+            base, end = divmod(chan.output_volume, 256 / self.WIDTH)
             if not end:
                 end = ''
             else:
@@ -1113,7 +1119,8 @@ class Player(object):
             column = f'{vol_bar}{end}'
 
             notes = []
-            for note in map(engine.to_name, chan.notes_playing):
+            playing = [self.note_arr[note_id].note_num for note_id in chan.notes if not self.note_arr[note_id].note_off]
+            for note in map(engine.to_name, playing):
                 notes.append(f'{note:^4}')
             notes = notes[:self.WIDTH//4-1]
             notes.append(f'{chan.wait_ticks:^3}')
@@ -1164,6 +1171,13 @@ class Player(object):
         sys.stdout.write(header + '\n')
         self.execute_processor()
 
+    def print_exit_message(self) -> None:
+        sys.stdout.write('\n')
+        seperator = [f'{"":{HORIZONTAL}>{self.WIDTH}}'] * len(self.channels)
+        exit_str = UP_AND_RIGHT + UP_AND_HORIZONTAL.join(seperator) + f'{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{UP_AND_LEFT}'
+        sys.stdout.write(exit_str+'\n'+'Exiting...\n')
+        return
+
     def execute_processor(self) -> None:
         """Execute the event processor and update the user display.
 
@@ -1185,25 +1199,29 @@ class Player(object):
         """
         e = self.update_processor
         s = time.sleep
-        f = math.floor
+        f = math.fabs
         r = round
-        t = time.time
+        t = time.perf_counter
         d = self.display
-        m = self.INSTRUCTIONS_PER_CYCLE
+        c = 0.0
         try:
             while True:
                 st = t()
-                if not e() or d():
+                p_m = int(c)
+                c += self.tempo / (150 * self.PLAYBACK_RATE)
+                m = int(c - p_m)
+                c = math.fmod(c, 96)
+                out = [e() + d() for _ in range(m)]
+                stopped = any(filter(lambda x: x == 0, out))
+                if stopped:
                     break
-                if r(f((1 / self.tempo * m - (t() - st)) * 1000) / 1000, 3) < 0:
+                if r(1/59.97 - (t() - st), 3) < 0:
                     continue
-                s(r(f((1 / self.tempo * m - (t() - st)) * 1000) / 1000, 3))
+                s(f(r(1/59.97 - (t() - st), 3)))
         except KeyboardInterrupt:
-            sys.stdout.write('\n')
-            seperator = [f'{"":{HORIZONTAL}>{self.WIDTH}}'] * len(self.channels)
-            exit_str = UP_AND_RIGHT + UP_AND_HORIZONTAL.join(seperator) + f'{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{UP_AND_LEFT}'
-            sys.stdout.write(exit_str+'\n'+'Exiting...\n')
-            return
+            pass
+        finally:
+            self.print_exit_message()
 
     def stop_song(self):
         """Stop playback and reset the player."""
