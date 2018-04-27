@@ -194,6 +194,7 @@ class Parser(object):
             last_cmd = 0xBE
             last_notes = [0] * 66
             last_velocity = [0] * 66
+            last_group = [0] * 66
             last_patch = 0
             insub = 0
             transpose = 0
@@ -263,14 +264,23 @@ class Parser(object):
                             if arg2 < 0x80:
                                 last_velocity[cmd_num] = arg2
                                 program_ctr += 1
-                                arg1 = self.file.rd_byte()
-                                if arg1 >= 0x03:
+                                arg3 = self.file.rd_byte()
+                                if arg3 <= 0x03:
+                                    last_group[cmd_num] = arg3
+                                    program_ctr += 1
+                                    cmd_num += 1
+                                elif 0x03 < arg3 < 0x80:
+                                    self.file.address -= 1
                                     continue
+                                else:
+                                    arg3 = last_group[cmd_num]
+                                    g = True
                             else:
                                 arg2 = last_velocity[cmd_num]
+                                arg3 = last_group[cmd_num]
                                 g = True
                             patch = arg1 + transpose
-                            event_queue.append(engine.Event(cticks, cmd, patch, arg2))
+                            event_queue.append(engine.Event(cticks, cmd, patch, arg2, arg3))
                         if not self.patch_exists(song, last_patch):
                             instrument_head = self.file.rd_inst_head(table_ptr + last_patch * 12)
 
