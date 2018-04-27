@@ -194,7 +194,6 @@ class Parser(object):
             last_cmd = 0xBE
             last_notes = [0] * 66
             last_velocity = [0] * 66
-            last_unknown = [0] * 66
             last_patch = 0
             insub = 0
             transpose = 0
@@ -216,7 +215,7 @@ class Parser(object):
                         last_cmd = cmd
                     event_queue.append(engine.Event(cticks, cmd, arg1))
                     program_ctr += 2
-                elif 0xC4 < cmd < 0xCF:
+                elif 0xC4 < cmd < 0xCE:
                     event_queue.append(engine.Event(cticks, cmd))
                     program_ctr += 1
                 elif cmd == 0xb9:
@@ -236,12 +235,12 @@ class Parser(object):
                     insub = 1
                     program_ctr = self.file.rd_gba_ptr()
 
-                elif 0x00 <= cmd < 0x80 or 0xCF <= cmd <= 0xFF:
-                    if 0xCF <= cmd <= 0xFF:
+                elif 0x00 <= cmd < 0x80 or 0xCE <= cmd <= 0xFF:
+                    if 0xCE <= cmd <= 0xFF:
                         program_ctr += 1
                         last_cmd = cmd
                     else:
-                        if last_cmd < 0xCF:
+                        if last_cmd < 0xCE:
                             event_queue.append(engine.Event(cticks, last_cmd, cmd))
                             program_ctr += 1
                             continue
@@ -255,8 +254,7 @@ class Parser(object):
                         if arg1 >= 0x80:
                             if cmd_num == 0:
                                 patch = last_notes[cmd_num] + transpose
-                                event_queue.append(engine.Event(cticks, cmd, patch, last_velocity[cmd_num],
-                                                last_unknown[cmd_num]))
+                                event_queue.append(engine.Event(cticks, cmd, patch, last_velocity[cmd_num]))
                             g = True
                         else:
                             last_notes[cmd_num] = arg1
@@ -265,20 +263,14 @@ class Parser(object):
                             if arg2 < 0x80:
                                 last_velocity[cmd_num] = arg2
                                 program_ctr += 1
-                                arg3 = self.file.rd_byte()
-                                if arg3 >= 0x80:
-                                    arg3 = last_unknown[cmd_num]
-                                    g = True
-                                else:
-                                    last_unknown[cmd_num] = arg3
-                                    program_ctr += 1
-                                    cmd_num += 1
+                                arg1 = self.file.rd_byte()
+                                if arg1 >= 0x03:
+                                    continue
                             else:
                                 arg2 = last_velocity[cmd_num]
-                                arg3 = last_unknown[cmd_num]
                                 g = True
                             patch = arg1 + transpose
-                            event_queue.append(engine.Event(cticks, cmd, patch, arg2, arg3))
+                            event_queue.append(engine.Event(cticks, cmd, patch, arg2))
                         if not self.patch_exists(song, last_patch):
                             instrument_head = self.file.rd_inst_head(table_ptr + last_patch * 12)
 

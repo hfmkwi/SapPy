@@ -526,7 +526,7 @@ class Player(object):
             frequency = int(note.frequency * math.pow(BASE, pitch))
             fmod.setFrequency(note.fmod_channel, frequency)
 
-            note.vib_pos += chan.vib_rate / 96
+            note.vib_pos += chan.vib_rate / 127
             note.vib_pos = math.fmod(note.vib_pos, 2)
 
     def advance_notes(self) -> None:
@@ -535,9 +535,21 @@ class Player(object):
             note: engine.Note
             if note.wait_ticks > 0:
                 note.wait_ticks -= 1
-            if note.wait_ticks <= 0 and not note.note_off:
-                if not self.channels[note.parent].is_sustain or note.wait_ticks == 0:
+            self.disable_notes(self.channels[note.parent])
+
+    def disable_notes(self, channel: engine.Channel) -> None:
+        for note_id in channel.notes.values():
+            note = self.note_arr[note_id]
+
+            if note.enable and not note.note_off:
+                if note.wait_ticks == -1 and not channel.is_sustain:
                     self.reset_note(note)
+                    self.show_processor_exec('SUSTAIN NOTE OFF',
+                                                note.parent, note_id)
+                elif note.wait_ticks == 0:
+                    self.reset_note(note)
+                    self.show_processor_exec('TIMEOUT NOTE OFF',
+                                                note.parent, note_id)
 
     def update_channels(self) -> None:
         """Advance each channel 1 tick and continue processor execution for all 0-tick channels."""
@@ -549,7 +561,7 @@ class Player(object):
             while chan.wait_ticks <= 0:
                 event: engine.Event = chan.event_queue[chan.program_ctr]
                 cmd_byte = event.cmd_byte
-                args = event.arg1, event.arg2, event.arg3
+                args = event.arg1, event.arg2
 
                 if cmd_byte in (0xB1, 0xB6):
                     chan.is_enabled = False
@@ -630,7 +642,7 @@ class Player(object):
                         self.show_processor_exec('SET PITCH BEND', chan_id,
                                                  chan.pitch_bend)
                     else:
-                        chan.pitch_range = engine.to_int(args[0])
+                        chan.pitch_range = args[0]
                         self.show_processor_exec('SET PITCH RANGE', chan_id,
                                                  chan.pitch_range)
                     chan.program_ctr += 1
@@ -659,6 +671,8 @@ class Player(object):
                     self.show_processor_exec('DISABLE SUSTAIN', chan_id)
                     for nid in chan.notes.values():
                         note: engine.Note = self.note_arr[nid]
+                        if note.note_num != args[0] and args[0] > 0:
+                            continue
                         self.reset_note(note)
                         self.show_processor_exec('RELEASE NOTE', chan_id, nid)
                     chan.program_ctr += 1
@@ -695,16 +709,15 @@ class Player(object):
                         self.show_processor_exec('RELEASE NOTE', chan_id, nid)
                 elif cmd_byte >= 0xCF:
                     ll = engine.to_ticks(cmd_byte - 0xCF) + 1
-                    chan.is_sustain = False
                     if cmd_byte == 0xCF:
                         chan.is_sustain = True
                         ll = -1
-                    nn, vv, uu = args
+                    nn, vv = args
                     self.note_queue.append(
-                        engine.Note(nn, vv, chan_id, uu, ll, chan.patch_num))
+                        engine.Note(nn, vv, chan_id, 0, ll, chan.patch_num))
                     self.show_processor_exec(
                         'QUEUE NEW NOTE', chan_id, f'{ll:2} ticks',
-                        engine.to_name(nn), f'VOL: {vv:3}', f'UNK: {uu:3}')
+                        engine.to_name(nn), f'VOL: {vv:3}')
                     chan.program_ctr += 1
                 elif cmd_byte <= 0xB0:
                     if self.looped:
@@ -838,18 +851,7 @@ class Player(object):
             self.note_arr[note_num] = item
             chan = self.channels[item.parent]
 
-            for note_id in chan.notes.values():
-                note = self.note_arr[note_id]
-
-                if note.enable and not note.note_off:
-                    if note.wait_ticks <= 0 and not chan.is_sustain:
-                        self.reset_note(note)
-                        self.show_processor_exec('SUSTAIN NOTE OFF',
-                                                 item.parent, note_id)
-                    elif note.wait_ticks in (0, 1):
-                        self.reset_note(note)
-                        self.show_processor_exec('TIMEOUT NOTE OFF',
-                                                 item.parent, note_id)
+            self.disable_notes(chan)
             chan.notes[note_num] = note_num
             sample_id, frequency = self.get_playback_data(item)
             if not sample_id:
@@ -951,14 +953,13 @@ class Player(object):
                         note.env_dest = 255
                         note.env_step = note.env_atck
                         if output > engine.NoteTypes.DIRECT:
-                            note.env_dest = 255 * self.GB_SQ_MULTI
-                            note.env_step *= 8 * (note.velocity / 0x7F)
+                            note.env_step *= 16 * (note.velocity / 0x7F)
                     elif phase == engine.NotePhases.ATTACK:
                         note.phase = engine.NotePhases.DECAY
                         note.env_dest = note.env_sus
                         if output > engine.NoteTypes.DIRECT:
                             note.env_dest *= 8 * (note.velocity / 0x7F)
-                            note.env_step = (note.env_dcy - 0x08) * 8 * (note.velocity / 0x7F)
+                            note.env_step = (note.env_dcy - 0x08) * 16 * (note.velocity / 0x7F)
                         else:
                             note.env_step = (note.env_dcy - 0x100) / 2
                     elif phase == engine.NotePhases.DECAY:
@@ -970,7 +971,7 @@ class Player(object):
                         note.phase = engine.NotePhases.NOTEOFF
                         note.env_dest = 0
                         if output > engine.NoteTypes.DIRECT:
-                            note.env_step = (note.env_rel - 0x08) * 8 * (note.velocity / 0x7F)
+                            note.env_step = (note.env_rel - 0x08) * 16 * (note.velocity / 0x7F)
                         else:
                             note.env_step = (note.env_rel - 0x100)
                     elif phase == engine.NotePhases.NOTEOFF:
@@ -1197,27 +1198,29 @@ class Player(object):
             lookup upon a function call.
 
         """
-        e = self.update_processor
-        s = time.sleep
-        f = math.fabs
         r = round
-        t = time.perf_counter
         d = self.display
-        c = 0.0
+        e = self.update_processor
+        f = math.fabs
+        t = time.perf_counter
+        s = time.sleep
+        tick_ctr = 0.0
+        playing = True
         try:
-            while True:
-                st = t()
-                p_m = int(c)
-                c += self.tempo / (150 * self.PLAYBACK_RATE)
-                m = int(c - p_m)
-                c = math.fmod(c, 96)
-                out = [e() + d() for _ in range(m)]
-                stopped = any(filter(lambda x: x == 0, out))
-                if stopped:
-                    break
-                if r(1/59.97 - (t() - st), 3) < 0:
+            while playing:
+                start_time = t()
+                prev_ticks_per_frame = int(tick_ctr)
+                tick_ctr += r(self.tempo / (150 / self.PLAYBACK_RATE), 2)
+                ticks_per_frame = int(tick_ctr - prev_ticks_per_frame)
+                tick_ctr = math.fmod(tick_ctr, 96)
+                d()
+                for _ in range(ticks_per_frame):
+                    if not e():
+                        playing = False
+                    d()
+                if r(1/59.97 - (t() - start_time), 3) < 0:
                     continue
-                s(f(r(1/59.97 - (t() - st), 3)))
+                s(f(r(1/59.97 - (t() - start_time), 3)))
         except KeyboardInterrupt:
             pass
         finally:
