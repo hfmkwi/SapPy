@@ -1050,10 +1050,10 @@ class Player(object):
         TABLE_POINTER = f'{VERTICAL} TABLE POINTER: {VERTICAL} {f"0x{meta_data.song_ptr:X}":<8} {VERTICAL}'
         SONG_PTR = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
         VOICE_PTR = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
-        bottom = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{UP_AND_LEFT}'
+        BOTTOM = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{UP_AND_LEFT}'
         info = '\n'.join(
             (TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP, HEADER_ROM,
-             HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR, VOICE_PTR, bottom)) + '\n'
+             HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR, VOICE_PTR, BOTTOM)) + '\n'
         header = []
         for chan_id in range(len(self.channels)):
             header.append(f' CHANNEL {chan_id:<{self.WIDTH+1}} ')

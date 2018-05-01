@@ -153,9 +153,17 @@ class Parser(object):
             self.file.address = program_ctr
             cmd = self.file.rd_byte()
             program_ctr += 1
-            if cmd == Command.GOTO:
-                loop_offset = self.file.rd_gba_ptr()
+            if cmd in (Command.GOTO, Command.PATT):
                 program_ctr += 4
+                if cmd == Command.GOTO:
+                    return self.file.rd_gba_ptr()
+            elif cmd == Command.REPT:
+                program_ctr += 5
+            elif cmd == Command.MEMACC:
+                program_ctr += 3
+            elif Note.EOT <= cmd <= Note.N96:
+                while self.file.rd_byte() < 0x80:
+                    program_ctr += 1
             if cmd in (Command.FINE, Command.PREV):
                 break
 
@@ -400,7 +408,6 @@ class Parser(object):
             event_queue.append(engine.Event(elapsed_ticks, cmd))
 
             song.channels.append(channel)
-
         return song
 
     def get_song(self, fpath: str, song_num: int,
