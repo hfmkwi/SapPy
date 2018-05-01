@@ -48,7 +48,7 @@ if LIB is not None:
 
     playSound = fmod.FSOUND_PlaySoundEx
     playSound.argtypes = (ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
-                          ctypes.c_char)
+                          ctypes.c_bool)
     playSound.restype = ctypes.c_int
 
     stopSound = fmod.FSOUND_StopSound
@@ -86,6 +86,10 @@ if LIB is not None:
     disableFX = fmod.FSOUND_FX_Disable
     disableFX.argtypes = (ctypes.c_int,)
     disableFX.restype = ctypes.c_bool
+
+    setDefaults = fmod.FSOUND_Sample_SetDefaults
+    setDefaults.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
+    setDefaults.restype = ctypes.c_bool
 else:
     import random
     fmod = None

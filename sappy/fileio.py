@@ -14,7 +14,7 @@ class DirectHeader(typing.NamedTuple):
     smp_head: int = 0
     attack: int = 0
     hold: int = 0
-    is_sustain: int = 0
+    sustain: int = 0
     release: int = 0
 
 
@@ -80,7 +80,7 @@ class NoiseHeader(typing.NamedTuple):
     b5: int = 0
     attack: int = 0
     decay: int = 0
-    is_sustain: int = 0
+    sustain: int = 0
     release: int = 0
 
 
@@ -90,9 +90,7 @@ class SampleHeader(typing.NamedTuple):
     b0: int = 0
     b1: int = 0
     b2: int = 0
-    flags: int = 0
-    b4: int = 0
-    fine_tune: int = 0
+    is_looped: int = 0
     frequency: int = 0
     loop: int = 0
     size: int = 0
@@ -119,7 +117,7 @@ class SquareOneHeader(typing.NamedTuple):
     b5: int = 0
     attack: int = 0
     decay: int = 0
-    is_sustain: int = 0
+    sustain: int = 0
     release: int = 0
 
 
@@ -134,7 +132,7 @@ class SquareTwoHeader(typing.NamedTuple):
     b5: int = 0
     attack: int = 0
     decay: int = 0
-    is_sustain: int = 0
+    sustain: int = 0
     release: int = 0
 
 
@@ -146,7 +144,20 @@ class WaveHeader(typing.NamedTuple):
     sample: int = 0
     attack: int = 0
     decay: int = 0
-    is_sustain: int = 0
+    sustain: int = 0
+    release: int = 0
+
+
+class Header(typing.NamedTuple):
+    """Instrument header"""
+    type: int = 0
+    key: int = 0
+    arg3: int = 0
+    arg4: int = 0
+    arg5: int = 0
+    attack: int = 0
+    decay: int = 0
+    sustain: int = 0
     release: int = 0
 
 
@@ -260,7 +271,6 @@ class VirtualFile(object):
         self.address = addr
         return int.from_bytes(self._file.read(width), 'big')
 
-
     def rd_ltendian(self, width: int, addr: int = None) -> int:
         """Read a stream of int in little-endian format.
 
@@ -316,7 +326,7 @@ class VirtualFile(object):
             smp_head=self.rd_ltendian(4),
             attack=self.rd_byte(),
             hold=self.rd_byte(),
-            is_sustain=self.rd_byte(),
+            sustain=self.rd_byte(),
             release=self.rd_byte())
 
         return header
@@ -372,7 +382,7 @@ class VirtualFile(object):
             b5=self.rd_byte(),
             attack=self.rd_byte(),
             decay=self.rd_byte(),
-            is_sustain=self.rd_byte(),
+            sustain=self.rd_byte(),
             release=self.rd_byte())
 
         return header
@@ -395,10 +405,8 @@ class VirtualFile(object):
             b0=self.rd_byte(),
             b1=self.rd_byte(),
             b2=self.rd_byte(),
-            flags=self.rd_byte(),
-            b4=self.rd_byte(),
-            fine_tune=self.rd_byte(),
-            frequency=self.rd_ltendian(2),
+            is_looped=self.rd_byte(),
+            frequency=self.rd_ltendian(4),
             loop=self.rd_ltendian(4),
             size=self.rd_ltendian(4))
 
@@ -429,7 +437,7 @@ class VirtualFile(object):
             b5=self.rd_byte(),
             attack=self.rd_byte(),
             decay=self.rd_byte(),
-            is_sustain=self.rd_byte(),
+            sustain=self.rd_byte(),
             release=self.rd_byte())
         return header
 
@@ -445,7 +453,7 @@ class VirtualFile(object):
             b5=self.rd_byte(),
             attack=self.rd_byte(),
             decay=self.rd_byte(),
-            is_sustain=self.rd_byte(),
+            sustain=self.rd_byte(),
             release=self.rd_byte())
 
         return header
@@ -459,15 +467,28 @@ class VirtualFile(object):
             sample=self.rd_ltendian(4),
             attack=self.rd_byte(),
             decay=self.rd_byte(),
-            is_sustain=self.rd_byte(),
+            sustain=self.rd_byte(),
             release=self.rd_byte())
 
         return header
 
+    def read_header(self, address: int = None) -> Header:
+        self.address = address
+        header = Header(self.rd_byte(), self.rd_byte(), self.rd_byte(),
+                        self.rd_byte(), self.rd_ltendian(4), self.rd_byte(),
+                        self.rd_byte(), self.rd_byte(), self.rd_byte())
+        return header
+
     def get_song_table_ptr(self, track: int) -> None:
-        DEFAULT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801))
-        MT_CODE_TABLE = array.array('I', (0x1840_0B40, 0x0051_8882, 0x0089_1889, 0x680A_18C9, 0x1C10_6801))
-        ZM_CODE_TABLE = array.array('I', (0x4008_2002, 0xD002_2800, 0x4282_6918, 0x1C20_D003, 0xF001_2100))
+        DEFAULT_CODE_TABLE = array.array(
+            'I',
+            (0x1840_0B40, 0x0059_8883, 0x0089_18C9, 0x680A_1889, 0x1C10_6801))
+        MT_CODE_TABLE = array.array(
+            'I',
+            (0x1840_0B40, 0x0051_8882, 0x0089_1889, 0x680A_18C9, 0x1C10_6801))
+        ZM_CODE_TABLE = array.array(
+            'I',
+            (0x4008_2002, 0xD002_2800, 0x4282_6918, 0x1C20_D003, 0xF001_2100))
         GENERIC_CODE_TABLE = (DEFAULT_CODE_TABLE, ZM_CODE_TABLE, MT_CODE_TABLE)
         END_CODE = 0x4700_BC01
         SONG_PTR_OFFSET = 8
@@ -476,11 +497,11 @@ class VirtualFile(object):
         thumb_codes = array.array('I')
         thumb_codes.fromfile(self._file, self.size // thumb_codes.itemsize)
         for code_ind in range(len(thumb_codes) - END_CODE_OFFSET):
-            l_part = thumb_codes[code_ind:code_ind+CODE_TABLE_OFFSET]
+            l_part = thumb_codes[code_ind:code_ind + CODE_TABLE_OFFSET]
             l_match = any(l_part == table for table in GENERIC_CODE_TABLE)
-            r_match = thumb_codes[code_ind+END_CODE_OFFSET] == END_CODE
+            r_match = thumb_codes[code_ind + END_CODE_OFFSET] == END_CODE
             if l_match and r_match:
-                ptr = gba_ptr_to_addr(thumb_codes[code_ind+SONG_PTR_OFFSET])
+                ptr = gba_ptr_to_addr(thumb_codes[code_ind + SONG_PTR_OFFSET])
                 if self.rd_gba_ptr(ptr + track * 8) > self.size:
                     code_ind -= 7
                     continue
