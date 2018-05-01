@@ -1046,14 +1046,14 @@ class Player(object):
         HEADER_TOP = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>16}{DOWN_AND_LEFT}'
         HEADER_ROM = f'{VERTICAL} {meta_data.rom_name:^14} {VERTICAL}'
         HEADER_CODE = f'{VERTICAL} {meta_data.code:^14} {VERTICAL}'
-        top = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>16}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{DOWN_AND_LEFT}'
-        table_ptr = f'{VERTICAL} TABLE POINTER: {VERTICAL} {f"0x{meta_data.song_ptr:X}":<8} {VERTICAL}'
-        song_ptr = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
-        voice_ptr = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
+        TOP = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>16}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{DOWN_AND_LEFT}'
+        TABLE_POINTER = f'{VERTICAL} TABLE POINTER: {VERTICAL} {f"0x{meta_data.song_ptr:X}":<8} {VERTICAL}'
+        SONG_PTR = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
+        VOICE_PTR = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
         bottom = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{UP_AND_LEFT}'
         info = '\n'.join(
             (TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP, HEADER_ROM,
-             HEADER_CODE, top, table_ptr, song_ptr, voice_ptr, bottom)) + '\n'
+             HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR, VOICE_PTR, bottom)) + '\n'
         header = []
         for chan_id in range(len(self.channels)):
             header.append(f' CHANNEL {chan_id:<{self.WIDTH+1}} ')

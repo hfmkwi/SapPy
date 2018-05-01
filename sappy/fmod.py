@@ -70,22 +70,9 @@ if LIB is not None:
     systemClose = fmod.FSOUND_Close
     systemClose.restype = ctypes.c_void_p
 
-    enableFX = fmod.FSOUND_FX_Enable
-    enableFX.argtypes = (ctypes.c_int, ctypes.c_uint)
-    enableFX.restype = ctypes.c_int
-
-    setEcho = fmod.FSOUND_FX_SetEcho
-    setEcho.argtypes = (ctypes.c_int, ctypes.c_float, ctypes.c_float,
-                        ctypes.c_float, ctypes.c_float, ctypes.c_int)
-    setEcho.restype = ctypes.c_bool
-
     setPaused = fmod.FSOUND_SetPaused
     setPaused.argtypes = (ctypes.c_int, ctypes.c_bool)
     setPaused.restype = ctypes.c_bool
-
-    disableFX = fmod.FSOUND_FX_Disable
-    disableFX.argtypes = (ctypes.c_int,)
-    disableFX.restype = ctypes.c_bool
 
     setDefaults = fmod.FSOUND_Sample_SetDefaults
     setDefaults.argtypes = (ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_int)
