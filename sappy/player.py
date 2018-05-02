@@ -3,7 +3,7 @@
 
 Attributes
 ----------
-BASE: float
+config.SEMITONE_RATIO: float
     Base multiplier for calculating MIDI note frequencies from the base 440Hz
 
 """
@@ -16,14 +16,13 @@ import sys
 import time
 import typing
 
-import sappy.parser as parser
 import sappy.engine as engine
 import sappy.fileio as fileio
 import sappy.fmod as fmod
-
-from sappy.instructions import *
-
-BASE = math.pow(2, 1 / 12)
+import sappy.parser as parser
+import sappy.config as config
+from sappy.instructions import Command, Key, Note, Velocity, Wait
+import sappy.instructions as instructions
 
 # Box characters
 LIGHT = 0
@@ -113,23 +112,14 @@ class Player(object):
 
     """
 
-    SHOW_PROCESSOR_EXECUTION = False
-    SHOW_FMOD_EXECUTION = False
-    DISPLAY_NOTES = False
-
-    FRAME_RATE = 59.97  # AGB native framerate
-    PLAYBACK_RATE = 1
-
-    TRANSPOSE = 0
-    PSG_MULTI = .25
     WIDTH = 33
 
     logging.basicConfig(level=logging.DEBUG)
     PROCESSOR_LOGGER = logging.getLogger('PROCESSOR')
     FMOD_LOGGER = logging.getLogger('FMOD')
-    if not SHOW_PROCESSOR_EXECUTION:
+    if not config.SHOW_PROCESSOR_EXECUTION:
         PROCESSOR_LOGGER.setLevel(logging.WARNING)
-    if not SHOW_FMOD_EXECUTION:
+    if not config.SHOW_FMOD_EXECUTION:
         FMOD_LOGGER.setLevel(logging.WARNING)
 
     def __init__(self, volume=255):
@@ -413,8 +403,9 @@ class Player(object):
 
         """
 
-        high = int(0x80 + 0x7F * self.PSG_MULTI / 2)
-        low = int(0x80 - 0x7F * self.PSG_MULTI / 2)
+        high = round(0x80 + 0x7F * config.PSG_VOLUME / 2)
+        low = round(0x80 - 0x7F * config.PSG_VOLUME / 2)
+
 
         SQUARE_WAVES = [high] * 4 + [low] * 28, [high] * 8 + [low] * 24, [
             high
@@ -446,7 +437,7 @@ class Player(object):
         """
         for i in range(10):
             noise_data = [
-                int(random.random() * round(64 * self.PSG_MULTI / 2))
+                int(random.random() * round(64 * config.PSG_VOLUME / 2))
                 for _ in range(32767)
             ]
             frequency = 7040
@@ -465,7 +456,7 @@ class Player(object):
             os.remove(filename)
 
             noise_data = [
-                int(random.random() * round(64 * self.PSG_MULTI / 2))
+                int(random.random() * round(64 * config.PSG_VOLUME / 2))
                 for _ in range(127)
             ]
             frequency = 7040
@@ -528,14 +519,13 @@ class Player(object):
             if not channel.enabled or channel.lfo_speed == 0 and channel.mod_depth == 0:
                 continue
 
-            delta_freq = math.sin(
-                math.pi * note.lfos_position) * channel.mod_depth
+            delta_freq = math.sin(math.pi * note.lfos_position / 127) * channel.mod_depth
             pitch = (channel.pitch_bend - 0x40 + delta_freq) / 0x40 * 2
-            frequency = int(note.frequency * math.pow(BASE, pitch))
+            frequency = int(note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
             fmod.setFrequency(note.fmod_channel, frequency)
 
-            note.lfos_position += channel.lfo_speed / 127
-            note.lfos_position = math.fmod(note.lfos_position, 2)
+            note.lfos_position += channel.lfo_speed
+            note.lfos_position %= 254
 
     def advance_notes(self) -> None:
         """Advance each note 1 tick and release all 0-tick notes."""
@@ -655,7 +645,7 @@ class Player(object):
                         pitch = (channel.pitch_bend - 0x40
                                 ) / 0x40 * channel.pitch_range
                         frequency = round(
-                            note.frequency * math.pow(BASE, pitch))
+                            note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
                         fmod.setFrequency(note.fmod_channel, frequency)
                         self.debug_fmod_playback('SET NOTE FREQ', channel_id,
                                                  note_id, frequency)
@@ -676,7 +666,7 @@ class Player(object):
                 elif cmd_byte == Note.EOT:
                     for note_id in channel.notes_playing:
                         note: engine.Note = self.note_arr[note_id]
-                        if note.note_num not in args:
+                        if note.note_num not in args and 0 not in args:
                             continue
                         self.reset_note(note)
                         self.show_processor_exec(
@@ -835,9 +825,7 @@ class Player(object):
         for note in self.note_queue:
             note_id = self.free_note()
             if note_id is None:
-                # self.show_processor_exec('NO FREE NOTES', note.parent_channel)
                 continue
-            # self.show_processor_exec(f'USING FREE NOTE {note_id}', note.parent_channel)
 
             self.note_arr[note_id] = note
             channel = self.channels[note.parent_channel]
@@ -848,11 +836,11 @@ class Player(object):
             sample_id, frequency = self.get_playback_data(note)
             if not sample_id:
                 return
-            frequency *= math.pow(BASE, self.TRANSPOSE)
+            frequency *= math.pow(config.SEMITONE_RATIO, config.TRANSPOSE)
             pitch = (channel.pitch_bend - 0x40) / 0x40 * channel.pitch_range
             self.disable_notes(channel)
 
-            output_frequency = round(frequency * math.pow(BASE, pitch))
+            output_frequency = round(frequency * math.pow(config.SEMITONE_RATIO, pitch))
             output_panning = channel.panning * 2
             if not channel.muted:
                 output_volume = round(
@@ -947,7 +935,7 @@ class Player(object):
                         if not note.decay:
                             note.env_step = 0
                         else:
-                            note.env_step = (note.decay - 0x8) * 16 * (
+                            note.env_step = (note.decay - 0x8) * 32 * (
                                 0x7F / note.velocity)
                     else:
                         note.env_step = (note.decay - 0x100)
@@ -1051,9 +1039,9 @@ class Player(object):
         SONG_PTR = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
         VOICE_PTR = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
         BOTTOM = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{UP_AND_LEFT}'
-        info = '\n'.join(
-            (TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP, HEADER_ROM,
-             HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR, VOICE_PTR, BOTTOM)) + '\n'
+        info = '\n'.join((TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP,
+                          HEADER_ROM, HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR,
+                          VOICE_PTR, BOTTOM)) + '\n'
         header = []
         for chan_id in range(len(self.channels)):
             header.append(f' CHANNEL {chan_id:<{self.WIDTH+1}} ')
@@ -1096,7 +1084,6 @@ class Player(object):
 
         """
         MAX_VOLUME = 255
-        MAX_PAN = 127
         lines = []
         for channel in self.channels:
             channel: engine.Channel
@@ -1125,7 +1112,7 @@ class Player(object):
             column = list(f'{column}{" ":<{abs(self.WIDTH - len(column))}}')
             column[self.WIDTH // 2] = '|'
 
-            insert_pt = round(channel.panning / (MAX_PAN / (self.WIDTH - 1)))
+            insert_pt = round(channel.panning / (instructions.mxv / (self.WIDTH - 1)))
             column[insert_pt] = chr(0x2573)
 
             insert_pt = self.WIDTH - len(notes)
@@ -1203,23 +1190,24 @@ class Player(object):
             lookup upon a function call.
 
         """
+        FRAME_DELAY = 1 / config.FRAME_RATE
+
+
         # Local function copies
         d = self.display
         e = self.update_processor
         f = math.fabs
         t = time.perf_counter
         s = time.sleep
-
         tick_ctr = 0.0
         playing = True
-        FRAME_DELAY = 1 / self.FRAME_RATE
         try:
             while playing:
                 prev_ticks_per_frame = int(tick_ctr)
-                tick_ctr += round((self.tempo / 2) / (75 / self.PLAYBACK_RATE),
+                tick_ctr += round((self.tempo / 2) / (config.TICKS_PER_SECOND / config.PLAYBACK_SPEED),
                                   2)
                 ticks_per_frame = int(tick_ctr - prev_ticks_per_frame)
-                tick_ctr = math.fmod(tick_ctr, 75)
+                tick_ctr = math.fmod(tick_ctr, config.TICKS_PER_SECOND)
                 start_time = t()
                 d()
                 for _ in range(ticks_per_frame):

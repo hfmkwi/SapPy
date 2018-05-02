@@ -7,10 +7,9 @@ import typing
 
 import sappy.fileio as fileio
 import sappy.instructions as instructions
+import sappy.config as config
 
 NOTES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
-A8_FREQUENCY = 7040
-SEMITONE_RATIO = math.pow(2, 1 / 12)
 
 
 class ChannelTypes(enum.IntEnum):
@@ -246,7 +245,9 @@ class Sample(Type):
 
 def get_note(midi_note: int) -> str:
     """Retrieve the string name of a MIDI note from its byte representation."""
-    return instructions.Key(midi_note).name.replace('n', '').replace('s', '#')  # pylint: disable=E1101
+    octave, note = divmod(midi_note + config.TRANSPOSE, 12)
+    octave -= 2
+    return f'{NOTES[note]}{"M" if octave < 0 else ""}{abs(octave)}' # pylint: disable=E1101
 
 
 def get_frequency(midi_note: int, midc_freq: int = -1) -> int:
@@ -254,13 +255,13 @@ def get_frequency(midi_note: int, midc_freq: int = -1) -> int:
 
     note = midi_note - instructions.Key.Cn3
     if midc_freq == -1:  # is A8 or A7
-        base_freq = A8_FREQUENCY
-        c_freq = base_freq * math.pow(SEMITONE_RATIO, 3)
+        base_freq = config.A8_FREQUENCY
+        c_freq = base_freq * math.pow(config.SEMITONE_RATIO, 3)
     elif midc_freq == -2:
-        base_freq = A8_FREQUENCY // 2
-        c_freq = base_freq * math.pow(SEMITONE_RATIO, 3)
+        base_freq = config.A8_FREQUENCY // 2
+        c_freq = base_freq * math.pow(config.SEMITONE_RATIO, 3)
     else:
         c_freq = midc_freq
 
-    freq = c_freq * math.pow(SEMITONE_RATIO, note)
+    freq = c_freq * math.pow(config.SEMITONE_RATIO, note)
     return round(freq)

@@ -4,11 +4,11 @@
 """Main file."""
 import typing
 
+import sappy.config as config
 import sappy.engine as engine
 import sappy.fileio as fileio
 import sappy.fmod as fmod
-
-from sappy.instructions import *
+from sappy.instructions import Command, Wait, Note, Gate
 
 gba_ptr_to_addr = fileio.gba_ptr_to_addr
 
@@ -39,7 +39,7 @@ class MetaData(typing.NamedTuple):
     @property
     def echo_enabled(self):
         """Return whether the track has echo/reverb enabled."""
-        return bin(self.echo).lstrip('0b')[0] == '1'
+        return bin(self.echo)[2:][0] == '1'
 
     @property
     def code(self):
@@ -72,8 +72,8 @@ class Song(object):
 class Parser(object):
     """Parser/interpreter for Sappy code."""
 
-    GB_WAV_MULTI = 0.5 / 2
-    GB_WAV_BASE_FREQ = 8372
+
+
 
     def __init__(self):
         """Initialize all data containers for relevant channel and sample data."""
@@ -122,7 +122,7 @@ class Parser(object):
             smp_data = self.file._file.tell()
         else:
             size = 32
-            frequency = self.GB_WAV_BASE_FREQ
+            frequency = config.WAVEFORM_FREQUENCY
             loop_start = 0
             loop = True
             gb_wave = True
@@ -134,7 +134,7 @@ class Parser(object):
                 data = ord(tsi[l])
                 data /= 16**bi
                 data %= 16
-                data *= self.GB_WAV_MULTI * 16
+                data *= config.WAVEFORM_VOLUME * 16
                 smp_data.append(int(data))
         song.samples[sid] = engine.Sample(
             smp_data,
@@ -149,23 +149,28 @@ class Parser(object):
     def get_loop_offset(self, program_ctr: int):
         """Determine the looping address of a track/channel."""
         loop_offset = -1
-        while True:
+        cmd = 0
+        while cmd != Command.FINE:
             self.file.address = program_ctr
             cmd = self.file.rd_byte()
-            program_ctr += 1
-            if cmd in (Command.GOTO, Command.PATT):
+            if Wait.W00 <= cmd <= Wait.W96:
+                program_ctr += 1
+            elif cmd in (Command.GOTO, Command.PATT):
                 program_ctr += 4
                 if cmd == Command.GOTO:
                     return self.file.rd_gba_ptr()
+            elif Command.PRIO <= cmd <= 0xC6:
+                program_ctr += 1
             elif cmd == Command.REPT:
                 program_ctr += 5
             elif cmd == Command.MEMACC:
                 program_ctr += 3
             elif Note.EOT <= cmd <= Note.N96:
+                program_ctr += 1
                 while self.file.rd_byte() < 0x80:
                     program_ctr += 1
-            if cmd in (Command.FINE, Command.PREV):
-                break
+            else:
+                program_ctr += 1
 
         return loop_offset
 
