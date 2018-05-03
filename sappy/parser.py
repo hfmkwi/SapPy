@@ -10,7 +10,7 @@ import sappy.fileio as fileio
 import sappy.fmod as fmod
 from sappy.instructions import Command, Wait, Note, Gate
 
-gba_ptr_to_addr = fileio.gba_ptr_to_addr
+to_addr = fileio.to_addr
 
 
 class MetaData(typing.NamedTuple):
@@ -72,9 +72,6 @@ class Song(object):
 class Parser(object):
     """Parser/interpreter for Sappy code."""
 
-
-
-
     def __init__(self):
         """Initialize all data containers for relevant channel and sample data."""
         self.fpath = ''
@@ -109,10 +106,10 @@ class Parser(object):
     def get_smp(self, song: Song, direct: engine.Direct,
                 dct_head: fileio.DirectHeader) -> None:
         """Load a sample from ROM into memory."""
-        sid = direct.bound_sample = dct_head.smp_head
+        sid = direct.bound_sample = dct_head.sample_ptr
         if sid in song.samples:
             return
-        smp_head = self.file.rd_smp_head(gba_ptr_to_addr(sid))
+        smp_head = self.file.rd_smp_head(to_addr(sid))
         if direct.output_type == engine.DirectTypes.DIRECT:
             size = smp_head.size
             frequency = smp_head.frequency >> 10
@@ -121,18 +118,17 @@ class Parser(object):
             gb_wave = False
             smp_data = self.file._file.tell()
         else:
-            size = 32
+            size = config.WAVEFORM_SIZE
             frequency = config.WAVEFORM_FREQUENCY
             loop_start = 0
             loop = True
             gb_wave = True
-            tsi = self.file.rd_str(16, gba_ptr_to_addr(sid))
+            tsi = self.file.rd_str(16, to_addr(sid))
             smp_data = []
             for ai in range(32):
-                bi = ai % 2
-                l = int(ai / 2)
-                data = ord(tsi[l])
-                data /= 16**bi
+                tsi_ind, power = divmod(ai, 2)
+                data = ord(tsi[tsi_ind])
+                data /= 16**power
                 data %= 16
                 data *= config.WAVEFORM_VOLUME * 16
                 smp_data.append(int(data))
@@ -143,8 +139,6 @@ class Parser(object):
             loop_start=loop_start,
             loop=loop,
             gb_wave=gb_wave)
-
-    get_mul_smp = get_smp
 
     def get_loop_offset(self, program_ctr: int):
         """Determine the looping address of a track/channel."""
@@ -183,8 +177,7 @@ class Parser(object):
             if instrument_head.channel == 0x80:
                 direct_ptr = self.file.rd_drmkit_head().dct_tbl
 
-                patch_ptr = gba_ptr_to_addr(
-                    direct_ptr + self.instrument_id * 12)
+                patch_ptr = to_addr(direct_ptr + self.instrument_id * 12)
                 instrument_head = self.file.rd_inst_head(patch_ptr)
                 direct_head = self.file.rd_dct_head()
                 noise_head = self.file.rd_nse_head(patch_ptr + 2)
@@ -196,13 +189,12 @@ class Parser(object):
                 song.drumkits[last_patch] = engine.DrumKit(directs)
                 if direct.output_type in out:
                     self.get_smp(song, direct, direct_head)
-
             elif instrument_head.channel == 0x40:
                 multi_head = self.file.rd_mul_head()
 
-                keymap_ptr = gba_ptr_to_addr(multi_head.kmap)
+                keymap_ptr = to_addr(multi_head.kmap)
                 cdr = self.file.rd_byte(keymap_ptr + self.instrument_id)
-                cdr_ptr = gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12)
+                cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
                 instrument_head = self.file.rd_inst_head(cdr_ptr)
                 direct_head = self.file.rd_dct_head()
                 noise_head = self.file.rd_nse_head(cdr_ptr + 2)
@@ -230,8 +222,7 @@ class Parser(object):
             if instrument_head.channel == 0x80:
                 drumkit_head = self.file.rd_drmkit_head()
                 direct_ptr = drumkit_head.dct_tbl
-                patch_ptr = gba_ptr_to_addr(
-                    direct_ptr + self.instrument_id * 12)
+                patch_ptr = to_addr(direct_ptr + self.instrument_id * 12)
                 instrument_head = self.file.rd_inst_head(patch_ptr)
                 direct_head = self.file.rd_dct_head()
                 noise_head = self.file.rd_nse_head(patch_ptr + 2)
@@ -245,13 +236,13 @@ class Parser(object):
             elif instrument_head.channel == 0x40:
                 multi_head = self.file.rd_mul_head()
                 if self.instrument_id not in song.insts[last_patch].keymaps:
-                    keymap_ptr = gba_ptr_to_addr(multi_head.kmap)
+                    keymap_ptr = to_addr(multi_head.kmap)
                     direct_id = self.file.rd_byte(
                         keymap_ptr + self.instrument_id)
                     song.insts[last_patch].keymaps[
                         self.instrument_id] = direct_id
                 cdr = song.insts[last_patch].keymaps[self.instrument_id]
-                cdr_ptr = gba_ptr_to_addr(multi_head.dct_tbl + cdr * 12)
+                cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
                 instrument_head = self.file.rd_inst_head(cdr_ptr)
                 direct_head = self.file.rd_dct_head()
                 noise_head = self.file.rd_nse_head(cdr_ptr + 2)
@@ -288,7 +279,7 @@ class Parser(object):
             last_group = [0] * 256
             cmd_num = 0
             last_patch = 0
-            insub = 0
+            insub = False
             transpose = 0
             channel.loop_ptr = -1
             event_queue = channel.event_queue
@@ -301,13 +292,14 @@ class Parser(object):
                 cmd = self.file.rd_byte()
                 if cmd != Command.MEMACC and Command.REPT <= cmd <= Command.TUNE:
                     arg1 = self.file.rd_byte()
-                    if cmd == 0xBC:
+                    if cmd == Command.KEYSH:
                         transpose = arg1
-                    elif cmd == 0xBD:
-                        last_cmd = cmd
-                        last_patch = arg1
-                        self.load_instrument(song, table_ptr, last_patch)
-                    elif cmd in (0xBE, 0xBF, 0xC0, 0xC1, 0xC4, 0xC8):
+                    elif Command.VOICE <= cmd <= Command.TUNE and cmd not in (
+                            Command.MODT, Command.LFOS):
+                        if cmd == Command.VOICE:
+                            last_cmd = cmd
+                            last_patch = arg1
+                            self.load_instrument(song, table_ptr, last_patch)
                         last_cmd = cmd
                     event_queue.append(engine.Event(elapsed_ticks, cmd, arg1))
                     program_ctr += 2
@@ -319,31 +311,44 @@ class Parser(object):
                         engine.Event(elapsed_ticks, cmd, op, addr, data))
                     program_ctr += 4
                 elif cmd == Command.PEND:
-                    if insub == 1:
+                    if insub:
                         program_ctr = rpc  # pylint: disable=E0601
-                        insub = 0
+                        insub = False
                     else:
                         program_ctr += 1
                     event_queue.append(engine.Event(elapsed_ticks, cmd))
                 elif cmd == Command.PATT:
                     rpc = program_ctr + 5
-                    insub = 1
+                    insub = True
                     program_ctr = self.file.rd_gba_ptr()
                     event_queue.append(engine.Event(elapsed_ticks, cmd))
                 elif cmd == Command.XCMD:
                     last_cmd = cmd
-                    arg1 = self.file.rd_byte()
-                    arg2 = self.file.rd_byte()
+                    ext = self.file.rd_byte()
+                    arg = self.file.rd_byte()
                     event_queue.append(
-                        engine.Event(elapsed_ticks, cmd, arg1, arg2))
+                        engine.Event(elapsed_ticks, cmd, ext, arg))
                     program_ctr += 2
-                elif 0x00 <= cmd < 0x80 or Note.EOT <= cmd <= Note.N96:
-                    if Note.EOT <= cmd <= Note.N96:
+                elif cmd == Note.EOT:
+                    last_cmd = cmd
+                    arg1 = self.file.rd_byte()
+                    program_ctr += 1
+                    if arg1 < 0x80:
+                        program_ctr += 1
+                        event_queue.append(
+                            engine.Event(elapsed_ticks, cmd, arg1))
+                    else:
+                        event_queue.append(engine.Event(elapsed_ticks, cmd, 0))
+                elif 0x00 <= cmd < 0x80 or Note.TIE <= cmd <= Note.N96:
+                    if Note.TIE <= cmd <= Note.N96:
                         program_ctr += 1
                         last_cmd = cmd
                     else:
-                        if last_cmd < Note.EOT:
-                            if last_cmd == Command.VOICE:
+                        if last_cmd <= Note.EOT:
+                            if last_cmd == Note.EOT:
+                                event_queue.append(
+                                    engine.Event(elapsed_ticks, last_cmd, cmd))
+                            elif last_cmd == Command.VOICE:
                                 last_patch = cmd
                                 self.load_instrument(song, table_ptr,
                                                      last_patch)
@@ -351,10 +356,10 @@ class Parser(object):
                                     engine.Event(elapsed_ticks, last_cmd,
                                                  last_patch))
                             elif last_cmd == Command.XCMD:
-                                arg1 = self.file.rd_byte()
+                                arg = self.file.rd_byte()
                                 event_queue.append(
                                     engine.Event(elapsed_ticks, last_cmd, cmd,
-                                                 arg2))
+                                                 arg))
                             else:
                                 event_queue.append(
                                     engine.Event(elapsed_ticks, last_cmd, cmd))

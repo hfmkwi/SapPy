@@ -372,6 +372,7 @@ class Player(object):
                         f.write(bytes(sample.smp_data))
                     sample.fmod_id = self.load_sample('temp.raw', 0,
                                                       sample.size)
+                    os.remove('temp.raw')
                 else:
                     sample.fmod_id = self.load_sample(
                         file_path, sample.smp_data, sample.size)
@@ -383,6 +384,7 @@ class Player(object):
                         f.write(bytes(sample.smp_data))
                     sample.fmod_id = self.load_sample(
                         'temp.raw', 0, sample.size, sample.loop, False)
+                    os.remove('temp.raw')
                 else:
                     sample.fmod_id = self.load_sample(
                         file_path, sample.smp_data, sample.size, sample.loop,
@@ -402,10 +404,8 @@ class Player(object):
         The square waves have duty cycles of: 12.5%, 25%, 50%, 75%
 
         """
-
         high = round(0x80 + 0x7F * config.PSG_VOLUME / 2)
         low = round(0x80 - 0x7F * config.PSG_VOLUME / 2)
-
 
         SQUARE_WAVES = [high] * 4 + [low] * 28, [high] * 8 + [low] * 24, [
             high
@@ -516,12 +516,14 @@ class Player(object):
             if not note.enable:
                 continue
             channel = self.channels[note.parent_channel]
-            if not channel.enabled or channel.lfo_speed == 0 and channel.mod_depth == 0:
+            if not channel.enabled or channel.lfo_speed == 0 or channel.mod_depth == 0:
                 continue
 
-            delta_freq = math.sin(math.pi * note.lfos_position / 127) * channel.mod_depth
-            pitch = (channel.pitch_bend - 0x40 + delta_freq) / 0x40 * 2
-            frequency = int(note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
+            delta_freq = math.sin(
+                math.pi * note.lfos_position / 127) * channel.mod_depth
+            pitch = (channel.pitch_bend - 0x40 + delta_freq) / 0x40
+            frequency = round(
+                note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
             fmod.setFrequency(note.fmod_channel, frequency)
 
             note.lfos_position += channel.lfo_speed
@@ -540,7 +542,7 @@ class Player(object):
             note = self.note_arr[note_id]
 
             if note.enable and not note.note_off and note.wait_ticks == 0:
-                self.reset_note(note)
+                note.note_off = True
                 self.show_processor_exec(f'NOTE {note_id} OFF',
                                          note.parent_channel)
 
@@ -551,33 +553,26 @@ class Player(object):
                 continue
             if channel.wait_ticks > 0:
                 channel.wait_ticks -= 1
-            while channel.wait_ticks <= 0:
+            while channel.wait_ticks <= 0 and channel.enabled:
                 event: engine.Event = channel.event_queue[channel.program_ctr]
                 cmd_byte = event.cmd_byte
                 args = event.arg1, event.arg2
 
                 if cmd_byte in (Command.FINE, Command.PREV):
                     channel.enabled = False
-                    channel.sustained = False
                     self.show_processor_exec('FINE', channel_id)
-                    break
-                elif cmd_byte == Command.MEMACC:
-                    channel.program_ctr += 1
                     self.show_processor_exec('MEMACC', channel_id)
                 elif cmd_byte == Command.PRIO:
                     channel.priority = args[0]
-                    channel.program_ctr += 1
                     self.show_processor_exec(f'PRIO {channel.priority}',
                                              channel_id)
                 elif cmd_byte == Command.TEMPO:
                     self.tempo = args[0] * 2
                     self.show_processor_exec(f'TEMPO {self.tempo}', channel_id)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.KEYSH:
                     channel.transpose = args[0]
                     self.show_processor_exec(f'KEYSH {channel.transpose}',
                                              channel_id)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.VOICE:
                     channel.instrument_id = args[0]
                     if channel.instrument_id in self.direct_samples:
@@ -592,7 +587,6 @@ class Player(object):
                     self.show_processor_exec(
                         f'VOICE {channel.instrument_id} ({channel.output_type.name})',
                         channel_id)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.VOL:
                     channel.volume = args[0]
                     self.show_processor_exec(f'VOL {channel.volume}',
@@ -610,12 +604,9 @@ class Player(object):
                             dav = round(vel * vol * pos * 255)
                         output_volume.append(dav)
                         fmod.setVolume(note.fmod_channel, dav)
-                        if dav == 0:
-                            self.reset_note(note)
                         self.debug_fmod_playback(f'NOTE VOLUME {dav}',
                                                  channel_id, note_id)
                     channel.output_volume = self.average_volumes(output_volume)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.PAN:
                     channel.panning = args[0]
                     panning = channel.panning * 2
@@ -628,7 +619,6 @@ class Player(object):
                         fmod.setPan(note.fmod_channel, panning)
                         self.debug_fmod_playback('SET NOTE PANNING', channel_id,
                                                  note_id, panning)
-                    channel.program_ctr += 1
                 elif cmd_byte in (Command.BEND, Command.BENDR):
                     if cmd_byte == Command.BEND:
                         channel.pitch_bend = args[0]
@@ -644,54 +634,38 @@ class Player(object):
                             continue
                         pitch = (channel.pitch_bend - 0x40
                                 ) / 0x40 * channel.pitch_range
-                        frequency = round(
-                            note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
+                        frequency = round(note.frequency * math.pow(
+                            config.SEMITONE_RATIO, pitch))
                         fmod.setFrequency(note.fmod_channel, frequency)
                         self.debug_fmod_playback('SET NOTE FREQ', channel_id,
                                                  note_id, frequency)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.LFOS:
                     channel.lfo_speed = args[0]
                     self.show_processor_exec(f'LFOS {channel.lfo_speed}',
                                              channel_id)
-                    channel.program_ctr += 1
-                elif cmd_byte == Command.LFODL:
-                    self.show_processor_exec(f'LFODL {args[0]}', channel_id)
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.MOD:
                     channel.mod_depth = args[0]
                     self.show_processor_exec(f'MOD {channel.mod_depth}',
                                              channel_id)
-                    channel.program_ctr += 1
                 elif cmd_byte == Note.EOT:
                     for note_id in channel.notes_playing:
                         note: engine.Note = self.note_arr[note_id]
-                        if note.note_num not in args and 0 not in args:
+                        if note.note_num != args[0] and args[0] != 0:
                             continue
-                        self.reset_note(note)
+                        note.note_off = True
                         self.show_processor_exec(
                             f'EOT {Key(args[0]).name} ({note_id})', channel_id)
-                    channel.program_ctr += 1
-                elif cmd_byte == Command.PATT:
-                    self.show_processor_exec('PATT', channel_id)
-                    channel.program_ctr += 1
-                elif cmd_byte == Command.PEND:
-                    self.show_processor_exec('PEND', channel_id)
-                    channel.program_ctr += 1
-                elif cmd_byte == Command.REPT:
-                    channel.program_ctr += 1
                 elif cmd_byte == Command.GOTO:
                     self.looped = True
-                    for note_id in channel.notes_playing:
-                        self.reset_note(self.note_arr[note_id])
                     channel.program_ctr = channel.loop_ptr
                     self.show_processor_exec(f'GOTO 0x{channel.loop_ptr:X}',
                                              channel_id)
+                    continue
                 elif Note.N96 >= cmd_byte >= Note.TIE:
                     if cmd_byte == Note.TIE:
                         ll = -1
                     else:
-                        ll = int(Note(cmd_byte).name[1:]) + 1  # pylint: disable=E1136
+                        ll = int(Note(cmd_byte).name[1:])  # pylint: disable=E1136
                     nn, vv = event.arg1, event.arg2
                     self.note_queue.append(
                         engine.Note(nn, vv, channel_id, ll,
@@ -699,17 +673,8 @@ class Player(object):
                     self.show_processor_exec(
                         f'{Note(cmd_byte).name} {Key(nn).name} {Velocity(vv).name}',
                         channel_id)
-                    channel.program_ctr += 1
                 elif Wait.W00 <= cmd_byte <= Wait.W96:
-                    if self.looped:
-                        self.looped = False
-                        channel.wait_ticks = 0
-                    n_event_queue = channel.event_queue[channel.program_ctr + 1]
-                    if channel.program_ctr > 0:
-                        channel.wait_ticks = n_event_queue.ticks - event.ticks
-                    else:
-                        channel.wait_ticks = n_event_queue.ticks
-                    channel.program_ctr += 1
+                    channel.wait_ticks = int(Wait(cmd_byte).name[1:])
                     self.show_processor_exec(f'WAIT {channel.wait_ticks}',
                                              channel_id)
                 elif cmd_byte == 0xCD:
@@ -719,11 +684,14 @@ class Player(object):
                     elif args[0] == 0x09:
                         self.show_processor_exec(f'XCMD xIECL {args[1]}',
                                                  channel_id)
-                    channel.program_ctr += 1
                 else:
-                    self.show_processor_exec('UNKNOWN', channel_id,
-                                             f'0x{cmd_byte:X}')
-                    channel.program_ctr += 1
+                    try:
+                        com = Command(cmd_byte)
+                        self.show_processor_exec(com.name, channel_id)
+                    except:
+                        self.show_processor_exec(f'UNKNOWN (0x{cmd_byte:X})',
+                                                 channel_id)
+                channel.program_ctr += 1
 
     def set_note(self, note: engine.Note, direct: engine.Direct):
         """Assign a Direct's output and environment properties to a note."""
@@ -840,7 +808,8 @@ class Player(object):
             pitch = (channel.pitch_bend - 0x40) / 0x40 * channel.pitch_range
             self.disable_notes(channel)
 
-            output_frequency = round(frequency * math.pow(config.SEMITONE_RATIO, pitch))
+            output_frequency = round(
+                frequency * math.pow(config.SEMITONE_RATIO, pitch))
             output_panning = channel.panning * 2
             if not channel.muted:
                 output_volume = round(
@@ -850,16 +819,12 @@ class Player(object):
             volumes[note.parent_channel].append(output_volume)
             note.frequency = frequency
             note.phase = engine.NotePhases.INITIAL
-
             note.fmod_channel = fmod.playSound(
                 note_id, self.fmod_samples[sample_id].fmod_id, None, True)
             self.debug_fmod_playback('PLAY NOTE', note.parent_channel, note_id)
             fmod.setFrequency(note.fmod_channel, output_frequency)
             self.debug_fmod_playback('SET FREQUENCY', note.parent_channel,
                                      note_id, f'{output_frequency} Hz')
-            fmod.setVolume(note.fmod_channel, output_volume)
-            self.debug_fmod_playback('SET VOLUME', note.parent_channel, note_id,
-                                     output_volume)
             fmod.setPan(note.fmod_channel, output_panning)
             self.debug_fmod_playback('SET PANNING', note.parent_channel,
                                      note_id)
@@ -965,6 +930,7 @@ class Player(object):
                                              f'FCHAN: {note.fmod_channel}')
                     note.fmod_channel = 0
                     note.enable = False
+                    note.lfos_position = 0
                     note.parent_channel = -1
                     channel.notes_playing.remove(note_id)
 
@@ -1036,12 +1002,13 @@ class Player(object):
         HEADER_CODE = f'{VERTICAL} {meta_data.code:^14} {VERTICAL}'
         TOP = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>16}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{DOWN_AND_LEFT}'
         TABLE_POINTER = f'{VERTICAL} TABLE POINTER: {VERTICAL} {f"0x{meta_data.song_ptr:X}":<8} {VERTICAL}'
-        SONG_PTR = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
-        VOICE_PTR = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
+        SONG_PTR = f'{VERTICAL}  SONG POINTER: {VERTICAL} {f"0x{meta_data.header_ptr:X}":<8} {VERTICAL}'
+        VOICE_PTR = f'{VERTICAL} VOICE POINTER: {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<8} {VERTICAL}'
+        ECHO = f'{VERTICAL}        REVERB: {VERTICAL} {f"{(meta_data.echo-128)/127 if meta_data.echo_enabled else 0:<2.0%}":<8} {VERTICAL}'
         BOTTOM = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>16}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>10}{UP_AND_LEFT}'
         info = '\n'.join((TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP,
                           HEADER_ROM, HEADER_CODE, TOP, TABLE_POINTER, SONG_PTR,
-                          VOICE_PTR, BOTTOM)) + '\n'
+                          VOICE_PTR, ECHO, BOTTOM)) + '\n'
         header = []
         for chan_id in range(len(self.channels)):
             header.append(f' CHANNEL {chan_id:<{self.WIDTH+1}} ')
@@ -1112,7 +1079,8 @@ class Player(object):
             column = list(f'{column}{" ":<{abs(self.WIDTH - len(column))}}')
             column[self.WIDTH // 2] = '|'
 
-            insert_pt = round(channel.panning / (instructions.mxv / (self.WIDTH - 1)))
+            insert_pt = round(channel.panning / (instructions.mxv /
+                                                 (self.WIDTH - 1)))
             column[insert_pt] = chr(0x2573)
 
             insert_pt = self.WIDTH - len(notes)
@@ -1152,7 +1120,7 @@ class Player(object):
         self.direct_samples = song.directs
         self.echo_enabled = song.meta_data.echo_enabled  # pylint: disable=E1101
         if self.echo_enabled:
-            self.echo = 128 - (song.meta_data.echo - 128)
+            self.echo = 127 - (song.meta_data.echo - 128)
         else:
             self.echo = 127
         self.init_player(fpath)
@@ -1190,8 +1158,7 @@ class Player(object):
             lookup upon a function call.
 
         """
-        FRAME_DELAY = 1 / config.FRAME_RATE
-
+        FRAME_DELAY = 1 / config.PLAYBACK_FRAMERATE
 
         # Local function copies
         d = self.display
@@ -1226,7 +1193,3 @@ class Player(object):
         """Stop playback and reset the player."""
         self.reset_player()
         fmod.systemClose()
-
-    def reset_note(self, note: engine.Note):
-        """Revert a note to default state and remove it from the interface."""
-        note.note_off = True

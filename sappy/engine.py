@@ -247,7 +247,7 @@ def get_note(midi_note: int) -> str:
     """Retrieve the string name of a MIDI note from its byte representation."""
     octave, note = divmod(midi_note + config.TRANSPOSE, 12)
     octave -= 2
-    return f'{NOTES[note]}{"M" if octave < 0 else ""}{abs(octave)}' # pylint: disable=E1101
+    return f'{NOTES[note]}{"M" if octave < 0 else ""}{abs(octave)}'  # pylint: disable=E1101
 
 
 def get_frequency(midi_note: int, midc_freq: int = -1) -> int:
@@ -255,10 +255,10 @@ def get_frequency(midi_note: int, midc_freq: int = -1) -> int:
 
     note = midi_note - instructions.Key.Cn3
     if midc_freq == -1:  # is A8 or A7
-        base_freq = config.A8_FREQUENCY
+        base_freq = config.BASE_FREQUENCY
         c_freq = base_freq * math.pow(config.SEMITONE_RATIO, 3)
     elif midc_freq == -2:
-        base_freq = config.A8_FREQUENCY // 2
+        base_freq = config.BASE_FREQUENCY // 2
         c_freq = base_freq * math.pow(config.SEMITONE_RATIO, 3)
     else:
         c_freq = midc_freq

@@ -11,7 +11,7 @@ class DirectHeader(typing.NamedTuple):
 
     b0: int = 0
     b1: int = 0
-    smp_head: int = 0
+    sample_ptr: int = 0
     attack: int = 0
     hold: int = 0
     sustain: int = 0
@@ -148,13 +148,12 @@ class WaveHeader(typing.NamedTuple):
     release: int = 0
 
 
-class Header(typing.NamedTuple):
+class DirectSoundHeader(typing.NamedTuple):
     """Instrument header"""
-    type: int = 0
     key: int = 0
-    arg3: int = 0
-    arg4: int = 0
-    arg5: int = 0
+    unused: int = 0
+    panning: int = 0
+    sample_ptr: int = 0
     attack: int = 0
     decay: int = 0
     sustain: int = 0
@@ -315,7 +314,7 @@ class VirtualFile(object):
         """
         self.address = addr
         ptr = self.rd_ltendian(4)
-        return gba_ptr_to_addr(ptr)
+        return to_addr(ptr)
 
     def rd_dct_head(self, addr: int = None) -> DirectHeader:
         """Read bytes from a specified file into a Direct header."""
@@ -323,7 +322,7 @@ class VirtualFile(object):
         header = DirectHeader(
             b0=self.rd_byte(),
             b1=self.rd_byte(),
-            smp_head=self.rd_ltendian(4),
+            sample_ptr=self.rd_ltendian(4),
             attack=self.rd_byte(),
             hold=self.rd_byte(),
             sustain=self.rd_byte(),
@@ -472,13 +471,6 @@ class VirtualFile(object):
 
         return header
 
-    def read_header(self, address: int = None) -> Header:
-        self.address = address
-        header = Header(self.rd_byte(), self.rd_byte(), self.rd_byte(),
-                        self.rd_byte(), self.rd_ltendian(4), self.rd_byte(),
-                        self.rd_byte(), self.rd_byte(), self.rd_byte())
-        return header
-
     def get_song_table_ptr(self, track: int) -> None:
         DEFAULT_CODE_TABLE = array.array(
             'I',
@@ -501,7 +493,7 @@ class VirtualFile(object):
             l_match = any(l_part == table for table in GENERIC_CODE_TABLE)
             r_match = thumb_codes[code_ind + END_CODE_OFFSET] == END_CODE
             if l_match and r_match:
-                ptr = gba_ptr_to_addr(thumb_codes[code_ind + SONG_PTR_OFFSET])
+                ptr = to_addr(thumb_codes[code_ind + SONG_PTR_OFFSET])
                 if self.rd_gba_ptr(ptr + track * 8) > self.size:
                     code_ind -= 7
                     continue
@@ -521,7 +513,7 @@ def open_new_file(file_path: str) -> VirtualFile:
     return open_file(file_path)
 
 
-def gba_ptr_to_addr(ptr: int) -> int:
+def to_addr(ptr: int) -> int:
     """Convert an AGB rom pointer to an address."""
     if ptr < 0x8000000 or ptr > 0x9FFFFFF:
         return -1
