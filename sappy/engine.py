@@ -93,7 +93,7 @@ class Channel(Type):
         self.loop_ptr: int = 0
         self.volume: int = instructions.mxv
         self.panning: int = instructions.c_v
-        self.instrument_id: int = 0x00
+        self.voice: int = 0x00
         self.pitch_bend: int = instructions.c_v
         self.pitch_range: int = 2
         self.program_ctr: int = 0
@@ -150,6 +150,10 @@ class DrumKit(Type):
     def __init__(self, directs: typing.Dict = {}):
         self.directs = directs
 
+    @property
+    def output_type(self):
+        return ChannelTypes.DRUMKIT
+
 
 class Event(Type):
     """Internal event."""
@@ -181,13 +185,17 @@ class Instrument(Type):
         self.directs = directs
         self.keymaps = keymaps
 
+    @property
+    def output_type(self):
+        return ChannelTypes.MULTI
+
 
 class Note(Type):
     """Container representing a single note in the AGB sound engine."""
     __slots__ = ('enable', 'note_off', 'env_dest', 'env_pos', 'env_step',
                  'lfos_position', 'wait_ticks', 'attack', 'decay', 'release',
                  'sustain', 'fmod_channel', 'frequency', 'note_num',
-                 'parent_channel', 'instrument_id', 'bound_sample',
+                 'parent_channel', 'voice', 'bound_sample',
                  'output_type', 'phase', 'fmod_fx', 'velocity')
 
     def __init__(self,
@@ -212,7 +220,7 @@ class Note(Type):
         self.frequency: int = 0
         self.note_num: int = note_num
         self.parent_channel: int = parent
-        self.instrument_id: int = patch_num
+        self.voice: int = patch_num
         self.bound_sample: str = ''
         self.output_type: NoteTypes = NoteTypes.DIRECT
         self.phase: NotePhases = NotePhases.INITIAL

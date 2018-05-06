@@ -8,7 +8,7 @@ import sappy.config as config
 import sappy.engine as engine
 import sappy.fileio as fileio
 import sappy.fmod as fmod
-from sappy.instructions import Command, Wait, Note, Gate
+from sappy.instructions import *
 
 to_addr = fileio.to_addr
 
@@ -61,52 +61,36 @@ class Song(object):
 
     def __init__(self):
         self.channels = []
-        self.directs = {}
-        self.drumkits = {}
-        self.insts = {}
         self.note_queue = {}
         self.samples = {}
+        self.voices = {}
         self.meta_data = MetaData()
 
 
 class Parser(object):
     """Parser/interpreter for Sappy code."""
 
-    def __init__(self):
-        """Initialize all data containers for relevant channel and sample data."""
-        self.fpath = ''
-
-        self.file = None
-
-    def patch_exists(self, song: Song, id: int) -> bool:
-        """Check if a ."""
-        return id in song.directs or id in song.insts or id in song.drumkits
-
     def new_direct(self, inst_head: fileio.InstrumentHeader,
-                   dct_head: fileio.DirectHeader,
-                   gb_head: fileio.NoiseHeader) -> engine.Direct:
+                   direct_header: fileio.DirectHeader,
+                   noise_header: fileio.NoiseHeader) -> engine.Direct:
         """Initialize a direct with the relevant fileio."""
         direct = engine.Direct()
         direct.drum_key = inst_head.drum_pitch
         direct.output_type = engine.DirectTypes(inst_head.channel & 7)
-        direct.attack = dct_head.attack
-        direct.decay = dct_head.hold
-        direct.sustain = dct_head.sustain
-        direct.release = dct_head.release
-        direct.raw0 = dct_head.b0
-        direct.raw1 = dct_head.b1
-        direct.psg_flag = gb_head.b2
-        direct.gb2 = gb_head.b3
-        direct.gb3 = gb_head.b4
-        direct.gb4 = gb_head.b5
+        direct.attack = direct_header.attack
+        direct.decay = direct_header.hold
+        direct.sustain = direct_header.sustain
+        direct.release = direct_header.release
+        direct.raw0 = direct_header.b0
+        direct.raw1 = direct_header.b1
+        direct.psg_flag = noise_header.b2
         direct.fix_pitch = (inst_head.channel & 0x08) == 0x08
-        direct.reverse = (inst_head.channel & 0x10) == 0x10
         return direct
 
     def get_smp(self, song: Song, direct: engine.Direct,
-                dct_head: fileio.DirectHeader) -> None:
+                direct_header: fileio.DirectHeader) -> None:
         """Load a sample from ROM into memory."""
-        sid = direct.bound_sample = dct_head.sample_ptr
+        sid = direct.bound_sample = direct_header.sample_ptr
         if sid in song.samples:
             return
         smp_head = self.file.rd_smp_head(to_addr(sid))
@@ -168,99 +152,59 @@ class Parser(object):
 
         return loop_offset
 
-    def load_instrument(self, song, table_ptr, last_patch):
-        out = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
+    def load_voice(self, song, table_ptr, last_patch, voice):
+        HAS_SAMPLE = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
 
-        if not self.patch_exists(song, last_patch):
-            instrument_head = self.file.rd_inst_head(
+        type_head = self.file.rd_inst_head(
                 table_ptr + last_patch * 12)
-            if instrument_head.channel == 0x80:
-                direct_ptr = self.file.rd_drmkit_head().dct_tbl
+        if type_head.channel == 0x80: # Percussion
+            direct_ptr = self.file.rd_drmkit_head().dct_tbl
+            patch_ptr = to_addr(direct_ptr + voice * 12)
+            type_head = self.file.rd_inst_head(patch_ptr)
+            direct_header = self.file.rd_dct_head()
+            noise_head = self.file.rd_nse_head(patch_ptr + 2)
+            direct = self.new_direct(type_head, direct_header,
+                                    noise_head)
+            if last_patch not in song.voices:
+                directs = {voice: direct}
+                song.voices[last_patch] = engine.DrumKit(directs)
+            elif voice not in song.voices[last_patch].directs:
+                song.voices[last_patch].directs[voice] = direct
+            if direct.output_type in HAS_SAMPLE:
+                self.get_smp(song, direct, direct_header)
+        elif type_head.channel == 0x40: # Multi
+            multi_head = self.file.rd_mul_head()
 
-                patch_ptr = to_addr(direct_ptr + self.instrument_id * 12)
-                instrument_head = self.file.rd_inst_head(patch_ptr)
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(patch_ptr + 2)
+            keymap_ptr = to_addr(multi_head.kmap)
+            cdr = self.file.rd_byte(keymap_ptr + voice)
+            cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
+            type_head = self.file.rd_inst_head(cdr_ptr)
+            direct_header = self.file.rd_dct_head()
+            noise_head = self.file.rd_nse_head(cdr_ptr + 2)
 
-                direct = self.new_direct(instrument_head, direct_head,
-                                         noise_head)
-                directs = {self.instrument_id: direct}
-
-                song.drumkits[last_patch] = engine.DrumKit(directs)
-                if direct.output_type in out:
-                    self.get_smp(song, direct, direct_head)
-            elif instrument_head.channel == 0x40:
-                multi_head = self.file.rd_mul_head()
-
-                keymap_ptr = to_addr(multi_head.kmap)
-                cdr = self.file.rd_byte(keymap_ptr + self.instrument_id)
-                cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
-                instrument_head = self.file.rd_inst_head(cdr_ptr)
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(cdr_ptr + 2)
-
-                args = instrument_head, direct_head, noise_head
-                keymaps = {self.instrument_id: cdr}
-                direct = self.new_direct(*args)
+            direct = self.new_direct(type_head, direct_header,
+                                        noise_head)
+            if last_patch not in song.voices:
+                keymaps = {voice: cdr}
                 directs = {cdr: direct}
                 instrument = engine.Instrument(directs, keymaps)
-                song.insts[last_patch] = instrument
-                if direct.output_type in out:
-                    self.get_smp(song, direct, direct_head)
-            else:
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(
-                    table_ptr + last_patch * 12 + 2)
-                direct = self.new_direct(instrument_head, direct_head,
-                                         noise_head)
-                song.directs[last_patch] = direct
-                if direct.output_type in out:
-                    self.get_smp(song, direct, direct_head)
-        else:
-            instrument_head = self.file.rd_inst_head(
-                table_ptr + last_patch * 12)
-            if instrument_head.channel == 0x80:
-                drumkit_head = self.file.rd_drmkit_head()
-                direct_ptr = drumkit_head.dct_tbl
-                patch_ptr = to_addr(direct_ptr + self.instrument_id * 12)
-                instrument_head = self.file.rd_inst_head(patch_ptr)
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(patch_ptr + 2)
-                if self.instrument_id not in song.drumkits[last_patch].directs:
-                    direct = self.new_direct(instrument_head, direct_head,
-                                             noise_head)
-                    song.drumkits[last_patch].directs[
-                        self.instrument_id] = direct
-                    if direct.output_type in out:
-                        self.get_smp(song, direct, direct_head)
-            elif instrument_head.channel == 0x40:
-                multi_head = self.file.rd_mul_head()
-                if self.instrument_id not in song.insts[last_patch].keymaps:
-                    keymap_ptr = to_addr(multi_head.kmap)
-                    direct_id = self.file.rd_byte(
-                        keymap_ptr + self.instrument_id)
-                    song.insts[last_patch].keymaps[
-                        self.instrument_id] = direct_id
-                cdr = song.insts[last_patch].keymaps[self.instrument_id]
-                cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
-                instrument_head = self.file.rd_inst_head(cdr_ptr)
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(cdr_ptr + 2)
-                if cdr not in song.insts[last_patch].directs:
-                    direct = self.new_direct(instrument_head, direct_head,
-                                             noise_head)
-                    song.insts[last_patch].directs[cdr] = direct
-                    if direct.output_type in out:
-                        self.get_smp(song, direct, direct_head)
-            else:
-                direct_head = self.file.rd_dct_head()
-                noise_head = self.file.rd_nse_head(
-                    table_ptr + self.instrument_id * 12 + 2)
-                direct = self.new_direct(instrument_head, direct_head,
-                                         noise_head)
-                song.directs[last_patch] = direct
-                if direct.output_type in out:
-                    self.get_smp(song, direct, direct_head)
+                song.voices[last_patch] = instrument
+            elif cdr not in song.voices[last_patch].directs:
+                song.voices[last_patch].directs[cdr] = direct
+            if voice not in song.voices[last_patch].keymaps:
+                direct_id = self.file.rd_byte(keymap_ptr + voice)
+                song.voices[last_patch].keymaps[voice] = direct_id
+            if direct.output_type in HAS_SAMPLE:
+                self.get_smp(song, direct, direct_header)
+        else: # Everything else
+            direct_header = self.file.rd_dct_head()
+            noise_head = self.file.rd_nse_head(
+                table_ptr + last_patch * 12 + 2)
+            direct = self.new_direct(type_head, direct_header,
+                                        noise_head)
+            song.voices[last_patch] = direct
+            if direct.output_type in HAS_SAMPLE:
+                self.get_smp(song, direct, direct_header)
 
     def load_song(self, header_ptr: int, table_ptr: int,
                   num_tracks: int) -> engine.Channel:
@@ -283,7 +227,7 @@ class Parser(object):
             transpose = 0
             channel.loop_ptr = -1
             event_queue = channel.event_queue
-            self.instrument_id = -1
+            voice = -1
             while True:
                 self.file.address = program_ctr
                 if program_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
@@ -294,12 +238,11 @@ class Parser(object):
                     arg1 = self.file.rd_byte()
                     if cmd == Command.KEYSH:
                         transpose = arg1
-                    elif Command.VOICE <= cmd <= Command.TUNE and cmd not in (
-                            Command.MODT, Command.LFOS):
+                    elif Command.VOICE <= cmd <= Command.TUNE:
                         if cmd == Command.VOICE:
                             last_cmd = cmd
                             last_patch = arg1
-                            self.load_instrument(song, table_ptr, last_patch)
+                            self.load_voice(song, table_ptr, last_patch, voice)
                         last_cmd = cmd
                     event_queue.append(engine.Event(elapsed_ticks, cmd, arg1))
                     program_ctr += 2
@@ -350,8 +293,8 @@ class Parser(object):
                                     engine.Event(elapsed_ticks, last_cmd, cmd))
                             elif last_cmd == Command.VOICE:
                                 last_patch = cmd
-                                self.load_instrument(song, table_ptr,
-                                                     last_patch)
+                                self.load_voice(song, table_ptr,
+                                                     last_patch, voice)
                                 event_queue.append(
                                     engine.Event(elapsed_ticks, last_cmd,
                                                  last_patch))
@@ -372,19 +315,11 @@ class Parser(object):
                     while not read_command:
                         self.file.address = program_ctr
                         note = self.file.rd_byte()
-                        if note >= Wait.W00:
-                            if not cmd_num:
-                                self.instrument_id = last_notes[cmd_num] + transpose
-                                event_queue.append(
-                                    engine.Event(elapsed_ticks, cmd,
-                                                 self.instrument_id,
-                                                 last_velocity[cmd_num]))
-                            read_command = True
-                        else:
+                        if note <= mxv:
                             last_notes[cmd_num] = note
                             program_ctr += 1
                             velocity = self.file.rd_byte()
-                            if velocity < Wait.W00:
+                            if velocity <= mxv:
                                 last_velocity[cmd_num] = velocity
                                 program_ctr += 1
                                 group = self.file.rd_byte()
@@ -393,7 +328,7 @@ class Parser(object):
                                     program_ctr += 1
                                     cmd_num += 1
                                     read_command = True
-                                elif Gate.gtp3 < group < Wait.W00:
+                                elif Gate.gtp3 < group <= mxv:
                                     read_command = True
                                 else:
                                     group = last_group[cmd_num]
@@ -402,13 +337,21 @@ class Parser(object):
                                 velocity = last_velocity[cmd_num]
                                 group = last_group[cmd_num]
                                 read_command = True
-                            self.instrument_id = note + transpose
+                            voice = note + transpose
                             event = engine.Event(elapsed_ticks, cmd,
-                                                 self.instrument_id, velocity,
+                                                 voice, velocity,
                                                  group)
                             event_queue.append(event)
+                        else:
+                            if not cmd_num:
+                                voice = last_notes[cmd_num] + transpose
+                                event_queue.append(
+                                    engine.Event(elapsed_ticks, cmd,
+                                                 voice,
+                                                 last_velocity[cmd_num]))
+                            read_command = True
 
-                    self.load_instrument(song, table_ptr, last_patch)
+                    self.load_voice(song, table_ptr, last_patch, voice)
                 elif Wait.W00 <= cmd <= Wait.W96:
                     event_queue.append(engine.Event(elapsed_ticks, cmd))
                     elapsed_ticks += int(Wait(cmd).name[1:])  # pylint: disable=E1136
@@ -461,5 +404,7 @@ class Parser(object):
             voice_ptr=inst_table_ptr,
             song_ptr=song_list_ptr,
             unknown=unk)
+
+        self.file.close()
 
         return song

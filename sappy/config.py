@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 """Configuration file for the player."""
 GBA_BASE_FRAMERATE = 59.97
+TICKS_PER_SECOND = 75
 
 BASE_FREQUENCY = 7040
 SEMITONE_RATIO = 2**(1 / 12)
@@ -13,8 +14,15 @@ PSG_VOLUME = 0.25
 
 SHOW_PROCESSOR_EXECUTION = False
 SHOW_FMOD_EXECUTION = False
-DISPLAY_NOTES = False
 PLAYBACK_FRAMERATE = GBA_BASE_FRAMERATE * 2
 PLAYBACK_SPEED = GBA_BASE_FRAMERATE / PLAYBACK_FRAMERATE
 TRANSPOSE = 0
-TICKS_PER_SECOND = 75
+CHANNEL_WIDTH = 17
+VOLUME = 255
+
+# 0th bit - volume
+# 1st bit - panning
+# 2nd bit - notes
+# 3rd bit - ticks
+
+DISPLAY = 0b1111
