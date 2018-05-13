@@ -108,6 +108,7 @@ TYPE_WIDTH = len(sorted(TYPE_OVERRIDE.values(), key=len)[-1])
 TEMPO_TOP = f'{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{TEMPO_WIDTH + PADDING}}{DOWN_AND_LEFT}'
 TEMPO_BOTTOM = f'{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>{TEMPO_WIDTH + PADDING}}{VERTICAL_AND_LEFT}'
 
+
 def update_interface(player) -> str:
     """Update the user interface with the player data.
 
@@ -127,7 +128,7 @@ def update_interface(player) -> str:
     """
     MAX_VOLUME = 255
     lines = []
-    for channel in player.channels:
+    for channel in player.song.channels:
         channel: engine.Channel
         column = [" "] * config.CHANNEL_WIDTH
         vol_bar = ''
@@ -143,11 +144,6 @@ def update_interface(player) -> str:
             vol_bar = f'{"":{FULL_BLOCK}>{bars}}'
             column = list(f'{vol_bar}{end_bar}{" ":<{abs(config.CHANNEL_WIDTH - bars + 1)}}')
 
-        if config.DISPLAY & 0b10: # Panning
-            column[config.CHANNEL_WIDTH // 2] = VERTICAL
-            insert_pt = round(channel.panning * config.CHANNEL_WIDTH / instructions.mxv)
-            column[insert_pt] = chr(0x2573)
-
         if config.DISPLAY & 0b100: # Notes
             names = []
             active_notes = filter(lambda x: not player.note_arr[x].note_off, channel.notes_playing)
@@ -156,14 +152,19 @@ def update_interface(player) -> str:
             insert_pt = config.CHANNEL_WIDTH - len(names) - TICK_WIDTH + 1
             column[insert_pt:-TICK_WIDTH+1] = names
 
+        if config.DISPLAY & 0b10: # Panning
+            column[config.CHANNEL_WIDTH // 2] = VERTICAL
+            insert_pt = round(channel.panning * config.CHANNEL_WIDTH / instructions.mxv)
+            column[insert_pt] = chr(0x2573)
+
         if config.DISPLAY & 0b1000:
             column[-NOTE_WIDTH + 2:] = f'{channel.wait_ticks:^{TICK_WIDTH}}'
 
         column = ''.join(column)
-        t = TYPE_OVERRIDE.get(channel.output_type)
+        t = TYPE_OVERRIDE.get(channel.type)
         lines.append(f'{t:^{TYPE_WIDTH + PADDING}}{VERTICAL}{column:^{config.CHANNEL_WIDTH + 1}}')
 
-    output = f'{VERTICAL}{VERTICAL.join(lines)}{VERTICAL}{player.tempo:^{TEMPO_WIDTH + PADDING}}{VERTICAL}'
+    output = f'{VERTICAL}{VERTICAL.join(lines)}{VERTICAL}{player.tempo*2:^{TEMPO_WIDTH + PADDING}}{VERTICAL}'
     return output
 
 
@@ -171,7 +172,7 @@ def print_exit_message(player) -> None:
     sys.stdout.write('\n')
     seperator = [
         f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + 1}}'
-    ] * len(player.channels)
+    ] * len(player.song.channels)
     exit_str = UP_AND_RIGHT + UP_AND_HORIZONTAL.join(
         seperator) + f'{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>7}{UP_AND_LEFT}'
     sys.stdout.write('\n'.join((exit_str, 'Exiting...')))
@@ -196,7 +197,7 @@ def get_player_info(player, meta_data) -> str:
     TABLE_POINTER = f'{VERTICAL}{TABLE:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.song_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
     SONG_PTR = f'{VERTICAL}{SONG:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.header_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
     VOICE_PTR = f'{VERTICAL}{VOICE:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.voice_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
-    REVERB = f'{VERTICAL}{ECHO:>{HEADER_WIDTH}}{VERTICAL}{f" {(meta_data.echo-instructions.mxv-1)/instructions.mxv if meta_data.echo_enabled else 0:<2.0%}":<{POINTER_WIDTH}}{VERTICAL}'
+    REVERB = f'{VERTICAL}{ECHO:>{HEADER_WIDTH}}{VERTICAL}{f" {(meta_data.echo-instructions.mxv-1)/instructions.mxv:<2.0%}" if meta_data.echo_enabled else " DISABLED":<{POINTER_WIDTH}}{VERTICAL}'
     BOTTOM = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{POINTER_WIDTH}}{UP_AND_LEFT}'
 
     info = '\n'.join(
@@ -205,15 +206,16 @@ def get_player_info(player, meta_data) -> str:
 
     return info + get_channel_table(player)
 
+
 def get_channel_table(player) -> str:
     header = []
-    for chan_id in range(len(player.channels)):
+    for chan_id in range(len(player.song.channels)):
         header.append(f'{f"{CHANNEL}{chan_id}":^{config.CHANNEL_WIDTH + TYPE_WIDTH + PADDING * 2}}')
     header.append(f'{"TEMPO":^{TEMPO_WIDTH + PADDING}}')
     header = VERTICAL + VERTICAL.join(header) + VERTICAL
 
-    TOP = [f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + TYPE_WIDTH + PADDING * 2}}'] * len(player.channels)
-    BOTTOM = [f'{"":{HORIZONTAL}>{TYPE_WIDTH+PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + 1}}'] * len(player.channels)
+    TOP = [f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + TYPE_WIDTH + PADDING * 2}}'] * len(player.song.channels)
+    BOTTOM = [f'{"":{HORIZONTAL}>{TYPE_WIDTH+PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + 1}}'] * len(player.song.channels)
     top = DOWN_AND_RIGHT + DOWN_AND_HORIZONTAL.join(TOP) + TEMPO_TOP
     bot = VERTICAL_AND_RIGHT + VERTICAL_AND_HORIZONTAL.join(BOTTOM) + TEMPO_BOTTOM
     return top + '\n' + header + '\n' + bot
@@ -224,7 +226,7 @@ def display(player) -> None:
     out = update_interface(player)
     sys.stdout.write(out + '\r')
     sys.stdout.flush()
-    return 0
+
 
 def print_header(player, meta_data) -> None:
     header = get_player_info(player, meta_data)

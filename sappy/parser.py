@@ -6,11 +6,11 @@ import typing
 
 import sappy.config as config
 import sappy.engine as engine
-import sappy.fileio as fileio
+import sappy.romio as romio
 import sappy.fmod as fmod
 from sappy.instructions import *
 
-to_addr = fileio.to_addr
+to_addr = romio.to_address
 
 
 class MetaData(typing.NamedTuple):
@@ -70,262 +70,234 @@ class Song(object):
 class Parser(object):
     """Parser/interpreter for Sappy code."""
 
-    def new_direct(self, inst_head: fileio.InstrumentHeader,
-                   direct_header: fileio.DirectHeader,
-                   noise_header: fileio.NoiseHeader) -> engine.Direct:
-        """Initialize a direct with the relevant fileio."""
-        direct = engine.Direct()
-        direct.drum_key = inst_head.drum_pitch
-        direct.output_type = engine.DirectTypes(inst_head.channel & 7)
-        direct.attack = direct_header.attack
-        direct.decay = direct_header.hold
-        direct.sustain = direct_header.sustain
-        direct.release = direct_header.release
-        direct.raw0 = direct_header.b0
-        direct.raw1 = direct_header.b1
-        direct.psg_flag = noise_header.b2
-        direct.fix_pitch = (inst_head.channel & 0x08) == 0x08
-        return direct
-
-    def get_smp(self, song: Song, direct: engine.Direct,
-                direct_header: fileio.DirectHeader) -> None:
+    def get_sample(self, song: Song, voice: engine.Voice) -> None:
         """Load a sample from ROM into memory."""
-        sid = direct.bound_sample = direct_header.sample_ptr
-        if sid in song.samples:
-            return
-        smp_head = self.file.rd_smp_head(to_addr(sid))
-        if direct.output_type == engine.DirectTypes.DIRECT:
-            size = smp_head.size
-            frequency = smp_head.frequency >> 10
-            loop_start = smp_head.loop
-            loop = smp_head.is_looped == 0x40
-            gb_wave = False
-            smp_data = self.file._file.tell()
-        else:
-            size = config.WAVEFORM_SIZE
-            frequency = config.WAVEFORM_FREQUENCY
-            loop_start = 0
-            loop = True
-            gb_wave = True
-            tsi = self.file.rd_str(16, to_addr(sid))
-            smp_data = []
-            for ai in range(32):
-                tsi_ind, power = divmod(ai, 2)
-                data = ord(tsi[tsi_ind])
-                data /= 16**power
-                data %= 16
-                data *= config.WAVEFORM_VOLUME * 16
-                smp_data.append(int(data))
-        song.samples[sid] = engine.Sample(
-            smp_data,
-            size,
-            frequency,
-            loop_start=loop_start,
-            loop=loop,
-            gb_wave=gb_wave)
+        voice_sample = voice.sample_ptr
 
-    def get_loop_offset(self, program_ctr: int):
+        smp_head = self.file.read_sample(to_addr(voice_sample))
+        if voice.type == engine.DirectTypes.DIRECT:
+            sample = engine.Sample(
+                smp_data=self.file._file.tell(),
+                freq=smp_head.frequency >> 10,
+                loop=smp_head.is_looped == 0x40,
+                loop_start=smp_head.loop,
+                size=smp_head.size,
+            )
+        else:
+            wave_data = self.file.read_string(config.PSG_WAVEFORM_SIZE // 2, to_addr(voice_sample))
+            smp_data = []
+            for byte_ind in range(32):
+                wave_ind, power = divmod(byte_ind, 2)
+                data = ord(wave_data[wave_ind]) / 16**power % 16
+                data *= config.PSG_WAVEFORM_VOLUME
+                smp_data.append(int(data))
+            sample = engine.Sample(
+                size=config.PSG_WAVEFORM_SIZE,
+                freq=config.PSG_WAVEFORM_FREQUENCY,
+                smp_data=smp_data
+            )
+
+        song.samples.setdefault(voice_sample, sample)
+
+    def get_loop_address(self, program_ctr: int):
         """Determine the looping address of a track/channel."""
         loop_offset = -1
         cmd = 0
         while cmd != Command.FINE:
             self.file.address = program_ctr
-            cmd = self.file.rd_byte()
-            if Wait.W00 <= cmd <= Wait.W96:
-                program_ctr += 1
-            elif cmd in (Command.GOTO, Command.PATT):
+            cmd = self.file.read()
+            program_ctr += 1
+            if Wait.W00 <= cmd <= Wait.W96: # Wxx
+                pass
+            elif cmd == Command.PATT: # PATT(ADDRESS) [NON-REPEATABLE]
                 program_ctr += 4
-                if cmd == Command.GOTO:
-                    return self.file.rd_gba_ptr()
-            elif Command.PRIO <= cmd <= 0xC6:
+            elif cmd == Command.PEND: # PEND [NON-REPEATABLE]
+                program_ctr += 4
+            elif cmd == Command.GOTO: # GOTO(ADDRESS) [NON-REPEATABLE]
+                program_ctr += 4
+                loop_offset = self.file.read_gba_pointer()
+            elif Command.PRIO <= cmd <= Command.TUNE: # cmd(ARG) [REPEATABLE]
                 program_ctr += 1
-            elif cmd == Command.REPT:
+            elif cmd == Command.REPT: # REPT(COUNT, ADDRESS) [REPEATBLE]
                 program_ctr += 5
-            elif cmd == Command.MEMACC:
+            elif cmd == Command.MEMACC: # MEMACC(MEMACC_COM, ADDRESS, DATA) [REPEATABLE]
                 program_ctr += 3
-            elif Note.EOT <= cmd <= Note.N96:
-                program_ctr += 1
-                while self.file.rd_byte() < 0x80:
+            elif cmd == Command.XCMD:
+                program_ctr += 3
+            elif Note.EOT <= cmd <= Note.N96: # Nxx(KEY, [VELOCITY, [GROUP]])
+                while self.file.read() < 0x80:
                     program_ctr += 1
+            elif 0 <= cmd < 128: # REPEAT LAST COMMAND
+                pass
+            elif cmd == Command.FINE or cmd == Command.PREV:
+                break
             else:
-                program_ctr += 1
+                raise ValueError('invalid track')
 
         return loop_offset
 
-    def load_voice(self, song, table_ptr, last_patch, voice):
+    def load_voice(self, voice_type: int, voice_ptr: int):
+        SAMPLE_RANGE = range(0x1, 0x5)
+        UNSAMPLE_RANGE = range(0x9, 0xD)
+        if voice_type in SAMPLE_RANGE or voice_type in UNSAMPLE_RANGE:
+            data = self.file.read_psg_instrument(voice_ptr, voice_type in (0x3, 0x0B))
+        else:
+            data = self.file.read_directsound(voice_ptr)
+
+        return engine.Voice(data)
+
+    def load_instrument(self, song: Song, table_ptr: int, voice_id: int, sub_voice_id: int):
         HAS_SAMPLE = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
 
-        type_head = self.file.rd_inst_head(
-                table_ptr + last_patch * 12)
-        if type_head.channel == 0x80: # Percussion
-            direct_ptr = self.file.rd_drmkit_head().dct_tbl
-            patch_ptr = to_addr(direct_ptr + voice * 12)
-            type_head = self.file.rd_inst_head(patch_ptr)
-            direct_header = self.file.rd_dct_head()
-            noise_head = self.file.rd_nse_head(patch_ptr + 2)
-            direct = self.new_direct(type_head, direct_header,
-                                    noise_head)
-            if last_patch not in song.voices:
-                directs = {voice: direct}
-                song.voices[last_patch] = engine.DrumKit(directs)
-            elif voice not in song.voices[last_patch].directs:
-                song.voices[last_patch].directs[voice] = direct
-            if direct.output_type in HAS_SAMPLE:
-                self.get_smp(song, direct, direct_header)
-        elif type_head.channel == 0x40: # Multi
-            multi_head = self.file.rd_mul_head()
-
-            keymap_ptr = to_addr(multi_head.kmap)
-            cdr = self.file.rd_byte(keymap_ptr + voice)
-            cdr_ptr = to_addr(multi_head.dct_tbl + cdr * 12)
-            type_head = self.file.rd_inst_head(cdr_ptr)
-            direct_header = self.file.rd_dct_head()
-            noise_head = self.file.rd_nse_head(cdr_ptr + 2)
-
-            direct = self.new_direct(type_head, direct_header,
-                                        noise_head)
-            if last_patch not in song.voices:
-                keymaps = {voice: cdr}
-                directs = {cdr: direct}
-                instrument = engine.Instrument(directs, keymaps)
-                song.voices[last_patch] = instrument
-            elif cdr not in song.voices[last_patch].directs:
-                song.voices[last_patch].directs[cdr] = direct
-            if voice not in song.voices[last_patch].keymaps:
-                direct_id = self.file.rd_byte(keymap_ptr + voice)
-                song.voices[last_patch].keymaps[voice] = direct_id
-            if direct.output_type in HAS_SAMPLE:
-                self.get_smp(song, direct, direct_header)
+        voice_ptr = table_ptr + voice_id * 12
+        voice_type = self.file.read(voice_ptr)
+        if voice_type == 0x80: # Percussion
+            table_ptr = self.file.read_dword(self.file.address + 4)
+            sub_voice_ptr = to_addr(table_ptr + sub_voice_id * 12)
+            sub_voice_type = self.file.read(sub_voice_ptr)
+            voice = self.load_voice(sub_voice_type, sub_voice_ptr)
+            if voice_id not in song.voices:
+                song.voices[voice_id] = engine.DrumKit({sub_voice_id: voice})
+            else:
+                song.voices[voice_id].voice_table[sub_voice_id] = voice
+            if voice.type in HAS_SAMPLE:
+                self.get_sample(song, voice)
+        elif voice_type == 0x40: # Multi
+            voice_table = self.file.read_dword(self.file.address + 4)
+            keymap_ptr = to_addr(self.file.read_dword())
+            sub_voice_ind = self.file.read(keymap_ptr + sub_voice_id)
+            sub_voice_ptr = to_addr(voice_table + sub_voice_ind * 12)
+            sub_voice_type = self.file.read(sub_voice_ptr)
+            voice = self.load_voice(sub_voice_type, sub_voice_ptr)
+            if voice_id not in song.voices:
+                song.voices[voice_id] = engine.Instrument({sub_voice_ind: voice}, {sub_voice_id: sub_voice_ind})
+            else:
+                song.voices[voice_id].voice_table[sub_voice_ind] = voice
+                song.voices[voice_id].keymap[sub_voice_id] = sub_voice_ind
+            if voice.type in HAS_SAMPLE:
+                self.get_sample(song, voice)
         else: # Everything else
-            direct_header = self.file.rd_dct_head()
-            noise_head = self.file.rd_nse_head(
-                table_ptr + last_patch * 12 + 2)
-            direct = self.new_direct(type_head, direct_header,
-                                        noise_head)
-            song.voices[last_patch] = direct
-            if direct.output_type in HAS_SAMPLE:
-                self.get_smp(song, direct, direct_header)
+            if voice_id in song.voices:
+                return
+            voice = self.load_voice(voice_type, voice_ptr)
+            song.voices[voice_id] = voice
+            if voice.type in HAS_SAMPLE:
+                self.get_sample(song, voice)
 
-    def load_song(self, header_ptr: int, table_ptr: int,
+    def load_tracks(self, header_ptr: int, table_ptr: int,
                   num_tracks: int) -> engine.Channel:
         """Load all track data for a channel."""
 
         song = Song()
-        for track_num in range(1, num_tracks + 1):
-            channel = engine.Channel()
-            program_ctr = self.file.rd_gba_ptr(header_ptr + 4 + track_num * 4)
-            loop_addr = self.get_loop_offset(program_ctr)
 
-            elapsed_ticks = 0
-            last_cmd = Command.VOL
+        transpose = 0
+        for track_num in range(num_tracks):
+            channel = engine.Channel()
+            channel.priority = track_num
+            track_pos = self.file.read_gba_pointer(header_ptr + 8 + track_num * 4)
+            loop_address = self.get_loop_address(track_pos)
+
+            last_cmd = None
             last_notes = [0] * 256
             last_velocity = [0] * 256
             last_group = [0] * 256
             cmd_num = 0
-            last_patch = 0
+            voice = 0
             insub = False
-            transpose = 0
-            channel.loop_ptr = -1
+            channel.loop_address = -1
             event_queue = channel.event_queue
-            voice = -1
+            sub_voice = 0
             while True:
-                self.file.address = program_ctr
-                if program_ctr >= loop_addr and channel.loop_ptr == -1 and loop_addr != -1:
-                    channel.loop_ptr = len(event_queue)
+                self.file.address = track_pos
+                if track_pos >= loop_address and channel.loop_address == -1 and loop_address != -1:
+                    channel.loop_address = len(event_queue)
 
-                cmd = self.file.rd_byte()
-                if cmd != Command.MEMACC and Command.REPT <= cmd <= Command.TUNE:
-                    arg1 = self.file.rd_byte()
+                cmd = self.file.read()
+                if Command.PRIO <= cmd <= Command.TUNE:
+                    arg = self.file.read()
                     if cmd == Command.KEYSH:
-                        transpose = arg1
+                        transpose = arg
                     elif Command.VOICE <= cmd <= Command.TUNE:
                         if cmd == Command.VOICE:
                             last_cmd = cmd
-                            last_patch = arg1
-                            self.load_voice(song, table_ptr, last_patch, voice)
+                            voice = arg
+                            self.load_instrument(song, table_ptr, voice, sub_voice)
                         last_cmd = cmd
-                    event_queue.append(engine.Event(elapsed_ticks, cmd, arg1))
-                    program_ctr += 2
+                    event_queue.append(engine.Event(cmd, arg))
+                    track_pos += 2
                 elif cmd == Command.MEMACC:
-                    op = self.file.rd_byte()
-                    addr = self.file.rd_byte()
-                    data = self.file.rd_byte()
-                    event_queue.append(
-                        engine.Event(elapsed_ticks, cmd, op, addr, data))
-                    program_ctr += 4
+                    op = self.file.read()
+                    addr = self.file.read()
+                    data = self.file.read()
+                    event_queue.append(engine.Event(cmd, op, addr, data))
+                    track_pos += 4
                 elif cmd == Command.PEND:
                     if insub:
-                        program_ctr = rpc  # pylint: disable=E0601
+                        track_pos = rpc  # pylint: disable=E0601
                         insub = False
                     else:
-                        program_ctr += 1
-                    event_queue.append(engine.Event(elapsed_ticks, cmd))
+                        track_pos += 1
+                    event_queue.append(engine.Event(cmd))
                 elif cmd == Command.PATT:
-                    rpc = program_ctr + 5
+                    rpc = track_pos + 5
                     insub = True
-                    program_ctr = self.file.rd_gba_ptr()
-                    event_queue.append(engine.Event(elapsed_ticks, cmd))
+                    track_pos = self.file.read_gba_pointer()
+                    event_queue.append(engine.Event(cmd))
                 elif cmd == Command.XCMD:
                     last_cmd = cmd
-                    ext = self.file.rd_byte()
-                    arg = self.file.rd_byte()
-                    event_queue.append(
-                        engine.Event(elapsed_ticks, cmd, ext, arg))
-                    program_ctr += 2
+                    ext = self.file.read()
+                    arg = self.file.read()
+                    event_queue.append(engine.Event(cmd, ext, arg))
+                    track_pos += 2
                 elif cmd == Note.EOT:
                     last_cmd = cmd
-                    arg1 = self.file.rd_byte()
-                    program_ctr += 1
-                    if arg1 < 0x80:
-                        program_ctr += 1
+                    arg = self.file.read()
+                    track_pos += 1
+                    if arg < 0x80:
+                        track_pos += 1
                         event_queue.append(
-                            engine.Event(elapsed_ticks, cmd, arg1))
+                            engine.Event(cmd, arg))
                     else:
-                        event_queue.append(engine.Event(elapsed_ticks, cmd, 0))
+                        event_queue.append(engine.Event(cmd, 0))
                 elif 0x00 <= cmd < 0x80 or Note.TIE <= cmd <= Note.N96:
                     if Note.TIE <= cmd <= Note.N96:
-                        program_ctr += 1
+                        track_pos += 1
                         last_cmd = cmd
                     else:
                         if last_cmd <= Note.EOT:
                             if last_cmd == Note.EOT:
-                                event_queue.append(
-                                    engine.Event(elapsed_ticks, last_cmd, cmd))
+                                event_queue.append(engine.Event(last_cmd, cmd))
                             elif last_cmd == Command.VOICE:
-                                last_patch = cmd
-                                self.load_voice(song, table_ptr,
-                                                     last_patch, voice)
+                                voice = cmd
+                                self.load_instrument(song, table_ptr, voice, sub_voice)
                                 event_queue.append(
-                                    engine.Event(elapsed_ticks, last_cmd,
-                                                 last_patch))
+                                    engine.Event(last_cmd,
+                                                 voice))
                             elif last_cmd == Command.XCMD:
-                                arg = self.file.rd_byte()
-                                event_queue.append(
-                                    engine.Event(elapsed_ticks, last_cmd, cmd,
-                                                 arg))
+                                arg = self.file.read()
+                                event_queue.append(engine.Event(last_cmd, cmd, arg))
                             else:
-                                event_queue.append(
-                                    engine.Event(elapsed_ticks, last_cmd, cmd))
-                            program_ctr += 1
+                                event_queue.append(engine.Event(last_cmd, cmd))
+                            track_pos += 1
                             continue
                         else:
                             cmd = last_cmd
                     read_command = False
                     cmd_num = 0
                     while not read_command:
-                        self.file.address = program_ctr
-                        note = self.file.rd_byte()
+                        self.file.address = track_pos
+                        note = self.file.read()
                         if note <= mxv:
                             last_notes[cmd_num] = note
-                            program_ctr += 1
-                            velocity = self.file.rd_byte()
+                            track_pos += 1
+                            velocity = self.file.read()
                             if velocity <= mxv:
                                 last_velocity[cmd_num] = velocity
-                                program_ctr += 1
-                                group = self.file.rd_byte()
+                                track_pos += 1
+                                group = self.file.read()
                                 if group <= Gate.gtp3:
                                     last_group[cmd_num] = group
-                                    program_ctr += 1
+                                    track_pos += 1
                                     cmd_num += 1
                                     read_command = True
                                 elif Gate.gtp3 < group <= mxv:
@@ -337,63 +309,62 @@ class Parser(object):
                                 velocity = last_velocity[cmd_num]
                                 group = last_group[cmd_num]
                                 read_command = True
-                            voice = note + transpose
-                            event = engine.Event(elapsed_ticks, cmd,
-                                                 voice, velocity,
+                            sub_voice = note + transpose
+                            event = engine.Event(cmd,
+                                                 sub_voice, velocity,
                                                  group)
                             event_queue.append(event)
                         else:
                             if not cmd_num:
-                                voice = last_notes[cmd_num] + transpose
+                                sub_voice = last_notes[cmd_num] + transpose
                                 event_queue.append(
-                                    engine.Event(elapsed_ticks, cmd,
-                                                 voice,
+                                    engine.Event(cmd,
+                                                 sub_voice,
                                                  last_velocity[cmd_num]))
                             read_command = True
 
-                    self.load_voice(song, table_ptr, last_patch, voice)
+                        self.load_instrument(song, table_ptr, voice, sub_voice)
                 elif Wait.W00 <= cmd <= Wait.W96:
-                    event_queue.append(engine.Event(elapsed_ticks, cmd))
-                    elapsed_ticks += int(Wait(cmd).name[1:])  # pylint: disable=E1136
-                    program_ctr += 1
+                    event_queue.append(engine.Event(cmd))
+                    track_pos += 1
                 if cmd in (Command.FINE, Command.GOTO, Command.PREV):
                     break
-            event_queue.append(engine.Event(elapsed_ticks, cmd))
+
+            event_queue.append(engine.Event(cmd))
 
             song.channels.append(channel)
         return song
 
-    def get_song(self, fpath: str, song_num: int,
-                 song_list_ptr: int = None) -> Song:
+    def load_song(self, path: str, song: int, song_table_ptr: int = None) -> Song:
         """Load a song from ROM into memory.
 
         Loads all samples within the song's voice table and assigns them to
         instruments. Subsequently loads all event_queue commands the Sappy engine
         uses into an event queue for playback processing. Is repeatable.
         """
-        self.file = fileio.open_file(fpath)
+        self.file = romio.GBARom(path)
 
-        if song_list_ptr is None:
-            song_list_ptr = self.file.get_song_table_ptr(song_num)
-            if song_list_ptr == -1:
+        if song_table_ptr is None:
+            song_table_ptr = self.file.get_song_table(song)
+            if song_table_ptr == -1:
                 return -1
-        header_ptr = self.file.rd_gba_ptr(song_list_ptr + song_num * 8)
+        header_ptr = self.file.read_gba_pointer(song_table_ptr + song * 8)
 
         if header_ptr == -1:
             return -2
 
-        num_tracks = self.file.rd_byte(header_ptr)
+        num_tracks = self.file.read(header_ptr)
         if num_tracks == 0:
             return -3
 
-        unk = self.file.rd_byte()
-        priority = self.file.rd_byte()
-        echo = self.file.rd_byte()
-        inst_table_ptr = self.file.rd_gba_ptr()
-        game_name = self.file.rd_str(12, 0xA0)
-        game_code = self.file.rd_str(4, 0xAC)
+        unk = self.file.read()
+        priority = self.file.read()
+        echo = self.file.read()
+        inst_table_ptr = self.file.read_gba_pointer()
+        game_name = self.file.read_string(12, 0xA0)
+        game_code = self.file.read_string(4, 0xAC)
 
-        song = self.load_song(header_ptr, inst_table_ptr, num_tracks)
+        song = self.load_tracks(header_ptr, inst_table_ptr, num_tracks)
         song.meta_data = MetaData(
             rom_code=game_code,
             rom_name=game_name,
@@ -402,9 +373,7 @@ class Parser(object):
             priority=priority,
             header_ptr=header_ptr,
             voice_ptr=inst_table_ptr,
-            song_ptr=song_list_ptr,
+            song_ptr=song_table_ptr,
             unknown=unk)
-
-        self.file.close()
 
         return song

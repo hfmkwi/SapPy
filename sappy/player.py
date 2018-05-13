@@ -17,7 +17,7 @@ import time
 import typing
 
 import sappy.engine as engine
-import sappy.fileio as fileio
+import sappy.romio as romio
 import sappy.fmod as fmod
 import sappy.interface as interface
 import sappy.parser as parser
@@ -99,13 +99,10 @@ class Player(object):
         """
         self._global_vol = config.VOLUME
         self.tempo = 0
-        self.note_arr = [engine.Note(*[0] * 5)] * 32
-        self.channels = []
-        self.direct_samples = {}
-        self.drumkits = {}
-        self.multi_samples = {}
+        self.note_arr = [engine.Note(*[0] * 5)] * config.MAXIMUM_NOTES
+        self.song = parser.Song()
+        self.song.channels = []
         self.note_queue = []
-        self.fmod_samples = {}
 
     @property
     def global_vol(self) -> int:
@@ -157,19 +154,17 @@ class Player(object):
         notes, resets all PSG channel, and resets the tempo to 120 BPM.
 
         """
-        self.channels.clear()
-        self.drumkits.clear()
-        self.fmod_samples.clear()
-        self.multi_samples.clear()
-        self.direct_samples.clear()
+        self.song.channels.clear()
+        self.song.samples.clear()
+        self.song.voices.clear()
         self.note_queue.clear()
 
-        for i in range(31, -1, -1):
+        for i in range(config.MAXIMUM_NOTES - 1, -1, -1):
             self.note_arr[i].enable = False
 
         self.tempo = 120
 
-    def free_note(self) -> int:
+    def free_note(self, priority: int) -> int:
         """Check for the first disabled note in the global note array and return its ID.
 
         Notes
@@ -185,18 +180,25 @@ class Player(object):
             On failure, None.
 
         """
-        for i in range(31, -1, -1):
-            item = self.note_arr[i]
-            if item.enable is False:
-                return i
+        for note_id, note in enumerate(self.note_arr):
+            if not note.enable:
+                return note_id
+        for channel in self.song.channels:
+            if channel.priority > priority or not channel.notes_playing:
+                continue
+            note_id = channel.notes_playing[0]
+            note: engine.Note = self.note_arr[note_id]
+            note.wait_ticks = 0
+            note.env_pos = 0
+            note.enable = False
+            channel.notes_playing.remove(note_id)
+            fmod.stopSound(note.fmod_channel)
+            return note_id
         return None
 
     def load_sample(self,
                     fpath: str,
-                    offset: typing.Union[int, str] = 0,
-                    size: int = 0,
-                    loop: bool = True,
-                    gb_wave: bool = True) -> int:
+                    sample: engine.Sample) -> int:
         """Load a sample into the FMOD library.
 
         Parameters
@@ -218,19 +220,20 @@ class Player(object):
             A 32-bit pointer to the loaded sample.
 
         """
-        mode = fmod.FSoundModes._8BITS + fmod.FSoundModes.LOADRAW + fmod.FSoundModes.MONO
-        if loop:
-            mode += fmod.FSoundModes.LOOP_NORMAL
-        if gb_wave:
-            mode += fmod.FSoundModes.UNSIGNED
+        INDEX = fmod.FSoundChannelSampleMode.FREE
+        MODE = fmod.FSoundModes._8BITS + fmod.FSoundModes.LOADRAW + fmod.FSoundModes.MONO
+        if sample.loop:
+            MODE += fmod.FSoundModes.LOOP_NORMAL
+        if sample.gb_wave:
+            MODE += fmod.FSoundModes.UNSIGNED
         else:
-            mode += fmod.FSoundModes.SIGNED
+            MODE += fmod.FSoundModes.SIGNED
         fpath = fpath.encode('ascii')
-        index = fmod.FSoundChannelSampleMode.FREE
-        return fmod.sampleLoad(index, fpath, mode, offset, size)
+        if type(sample.smp_data) != int:
+            return fmod.sampleLoad(INDEX, fpath, MODE, 0, sample.size)
+        return fmod.sampleLoad(INDEX, fpath, MODE, sample.smp_data, sample.size)
 
-    def load_directsound(self, sample_pool: typing.Dict,
-                         file_path: str) -> None:
+    def load_directsound(self, file_path: str) -> None:
         """Load in all PCM8 samples into the FMOD library.
 
         Notes
@@ -250,37 +253,24 @@ class Player(object):
             The file path to the GBA ROM.
 
         """
-        for sample in sample_pool.values():
+        TEMP_FILE = 'temp'
+        for sample in self.song.samples.values():
             sample: engine.Sample
-            if sample.gb_wave:
-                if type(sample.smp_data) == list:
-                    with open('temp.raw', 'wb') as f:
-                        f.write(bytes(sample.smp_data))
-                    sample.fmod_id = self.load_sample('temp.raw', 0,
-                                                      sample.size)
-                    os.remove('temp.raw')
-                else:
-                    sample.fmod_id = self.load_sample(
-                        file_path, sample.smp_data, sample.size)
-                if sample.loop:
-                    fmod.setLoopPoints(sample.fmod_id, 0, 31)
+            if type(sample.smp_data) == list:
+                with open(TEMP_FILE, 'wb') as f:
+                    f.write(bytes(sample.smp_data))
+                sample.fmod_id = self.load_sample(TEMP_FILE, sample)
             else:
-                if type(sample.smp_data) == list:
-                    with open('temp.raw', 'wb') as f:
-                        f.write(bytes(sample.smp_data))
-                    sample.fmod_id = self.load_sample(
-                        'temp.raw', 0, sample.size, sample.loop, False)
-                    os.remove('temp.raw')
-                else:
-                    sample.fmod_id = self.load_sample(
-                        file_path, sample.smp_data, sample.size, sample.loop,
-                        False)
-                if sample.loop:
-                    fmod.setLoopPoints(sample.fmod_id, sample.loop_start,
-                                       sample.size - 1)
+                sample.fmod_id = self.load_sample(file_path, sample)
+            if sample.loop:
+                fmod.setLoopPoints(sample.fmod_id, sample.loop_start, sample.size - 1)
             fmod.setDefaults(sample.fmod_id, sample.frequency, 0, -1, -1)
+        try:
+            os.remove(TEMP_FILE)
+        except FileNotFoundError:
+            pass
 
-    def load_square(self, sample_pool: typing.Dict) -> None:
+    def load_square(self) -> None:
         """Load in all square waves into the sample pool.
 
         There are 4 square waves loaded into memory by ascending duty
@@ -290,30 +280,29 @@ class Player(object):
         The square waves have duty cycles of: 12.5%, 25%, 50%, 75%
 
         """
-        high = round(0x80 + 0x7F * config.PSG_VOLUME / 2)
-        low = round(0x80 - 0x7F * config.PSG_VOLUME / 2)
+        VARIANT = round(0x7F * config.PSG_SQUARE_VOLUME / 2)
+        LOW, HIGH = 0x80 - VARIANT, 0x80 + VARIANT
 
-        SQUARE_WAVES = [high] * 4 + [low] * 28, [high] * 8 + [low] * 24, [
-            high
-        ] * 16 + [low] * 16, [high] * 24 + [low] * 8
+        SQUARE_WAVES = (
+            [HIGH] * 4 + [LOW] * 28,
+            [HIGH] * 8 + [LOW] * 24,
+            [HIGH] * 16 + [LOW] * 16,
+            [HIGH] * 24 + [LOW] * 8
+        )
 
-        for duty_cycle, smp_data in enumerate(SQUARE_WAVES):
-            frequency = config.BASE_FREQUENCY
-            size = 32
-
+        for duty_cycle, wave_data in enumerate(SQUARE_WAVES):
             square = f'square{duty_cycle}'
-            filename = f'{square}.raw'
-            with open(filename, 'wb') as f:
-                f.write(bytes(smp_data))
-            fmod_id = self.load_sample(filename, gb_wave=True)
-            fmod.setLoopPoints(fmod_id, 0, 31)
-            sample_pool[square] = engine.Sample(smp_data, size, frequency,
-                                                fmod_id)
-            fmod.setDefaults(fmod_id, frequency, 0, -1, -1)
+            with open(square, 'wb') as f:
+                f.write(bytes(wave_data))
+            sample = engine.Sample(wave_data, config.PSG_SQUARE_SIZE, config.PSG_SQUARE_FREQUENCY, gb_wave=True)
+            sample.fmod_id = self.load_sample(square, sample)
+            self.song.samples[square] = sample
+            fmod.setLoopPoints(sample.fmod_id, 0, config.PSG_SQUARE_SIZE - 1)
+            fmod.setDefaults(sample.fmod_id, config.PSG_SQUARE_FREQUENCY, 0, -1, -1)
 
-            os.remove(filename)
+            os.remove(square)
 
-    def load_noise(self, sample_pool: typing.Dict) -> None:
+    def load_noise(self) -> None:
         """Load all noise waves into the sample pool.
 
         There are two types of samples noise waves loaded into memory: a
@@ -321,66 +310,49 @@ class Player(object):
         each are loaded in. Each sample has a base frequency of 7040 Hz.
 
         """
-        for i in range(10):
-            noise_data = [
-                int(random.random() * round(64 * config.PSG_VOLUME / 2))
-                for _ in range(32767)
-            ]
-            frequency = 7040
-            size = 32767
+        VOLUME_MULTI = round(64 * config.PSG_SQUARE_VOLUME / 2)
+        for noise_ind, sample_size in enumerate((config.PSG_NOISE_NORMAL_SIZE, config.PSG_NOISE_METALLIC_SIZE)):
+            for sample_ind in range(config.PSG_NOISE_SAMPLES):
+                noise_data = [
+                    int(random.random() * VOLUME_MULTI)
+                    for _ in range(sample_size)
+                ]
 
-            noise = f'noise0{i}'
-            filename = f'{noise}.raw'
-            with open(filename, 'wb') as f:
-                f.write(bytes(noise_data))
-            fmod_id = self.load_sample(filename)
-            fmod.setLoopPoints(fmod_id, 0, 32766)
-            sample_pool[noise] = engine.Sample(noise_data, size, frequency,
-                                               fmod_id)
-            fmod.setDefaults(fmod_id, 7040, 0, -1, -1)
+                noise = f'noise{noise_ind}{sample_ind}'
+                with open(noise, 'wb') as f:
+                    f.write(bytes(noise_data))
+                sample = engine.Sample(
+                    smp_data=noise_data,
+                    size=config.PSG_NOISE_NORMAL_SIZE,
+                    freq=config.PSG_SQUARE_FREQUENCY,
+                    gb_wave=True
+                )
+                sample.fmod_id = self.load_sample(noise, sample)
+                fmod.setLoopPoints(sample.fmod_id, 0, config.PSG_NOISE_NORMAL_SIZE)
+                fmod.setDefaults(sample.fmod_id, config.BASE_FREQUENCY, 0, -1, -1)
+                self.song.samples[noise] = sample
 
-            os.remove(filename)
-
-            noise_data = [
-                int(random.random() * round(64 * config.PSG_VOLUME / 2))
-                for _ in range(127)
-            ]
-            frequency = 7040
-            size = 127
-
-            noise = f'noise1{i}'
-            filename = f'{noise}.raw'
-            with open(filename, 'wb') as f:
-                f.write(bytes(noise_data))
-            fmod_id = self.load_sample(filename)
-            fmod.setLoopPoints(fmod_id, 0, 126)
-
-            sample_pool[noise] = engine.Sample(noise_data, size, frequency,
-                                               fmod_id)
-            fmod.setDefaults(fmod_id, 7040, 0, -1, -1)
-
-            os.remove(filename)
+                os.remove(noise)
 
     def init_player(self, fpath: str) -> None:
         """Iniate the FMOD player and load in all samples.
 
         The sound output is initially set to WINSOUND and the FMOD player
-        is then initiated with 64 channels at a sample rate of 44100 Hz.
+        is then initiated with 32 channels at a variable sample rate.
 
         """
-        fmod.setOutput(1)
+        fmod.setOutput(2)
         self.debug_fmod('SET OUTPUT')
 
-        FREQUENCIES = [5734,7884,10512,13379, 15768,18157,21024,26758,31536,36314,40137,42048]
-        fmod.systemInit(FREQUENCIES[5], 32, 0)
+        fmod.systemInit(self.mixer.frequency, config.MAXIMUM_NOTES, 0)
         self.debug_fmod('INIT PLAYER')
 
-        fmod.setMasterVolume(config.VOLUME)
+        fmod.setMasterVolume(self.mixer.volume * 17)
         self.debug_fmod('SET VOLUME', f'VOLUME: {config.VOLUME}')
 
-        self.load_directsound(self.fmod_samples, fpath)
-        self.load_noise(self.fmod_samples)
-        self.load_square(self.fmod_samples)
+        self.load_directsound(fpath)
+        self.load_noise()
+        self.load_square()
 
     def update_vibrato(self) -> None:
         """Update the vibrato position for each note of each vibrato-enabled channel.
@@ -396,110 +368,98 @@ class Player(object):
 
         The delta frequency is calculated using the following equation:
 
-        SIN(POS * π) * DEPTH
+        SIN(POS * Ï€) * DEPTH
 
         """
         for note in self.note_arr:
             if not note.enable:
                 continue
-            channel = self.channels[note.parent_channel]
+            channel = self.song.channels[note.parent_channel]
             if not channel.enabled or channel.lfo_speed == 0 or channel.mod_depth == 0:
                 continue
 
-            delta_freq = math.sin(
-                math.pi * note.lfos_position / 127) * channel.mod_depth
-            pitch = (channel.pitch_bend - 0x40 + delta_freq) / 0x40
-            frequency = round(
-                note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
+            delta_freq = round(channel.mod_depth // channel.pitch_range * math.sin(math.pi * note.lfos_position / 127))
+            pitch = (channel.pitch_bend + delta_freq - 0x40) / 0x40 * channel.pitch_range
+            frequency = round(note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
             fmod.setFrequency(note.fmod_channel, frequency)
 
             note.lfos_position += channel.lfo_speed
-            note.lfos_position %= 254
+            if note.lfos_position >= 254:
+                note.lfos_position = 0
 
     def advance_notes(self) -> None:
         """Advance each note 1 tick and release all 0-tick notes."""
-        for note in self.note_arr:
+        for note_id, note in enumerate(self.note_arr):
             note: engine.Note
             if note.wait_ticks > 0:
                 note.wait_ticks -= 1
-            self.disable_notes(self.channels[note.parent_channel])
-
-    def disable_notes(self, channel: engine.Channel) -> None:
-        for note_id in channel.notes_playing:
-            note = self.note_arr[note_id]
-
-            if note.enable and not note.note_off and note.wait_ticks == 0:
+            elif note.enable and not note.note_off and note.wait_ticks == 0:
                 note.note_off = True
                 self.show_processor_exec(f'NOTE {note_id} OFF',
                                          note.parent_channel)
 
     def update_channels(self) -> None:
         """Advance each channel 1 tick and continue processor execution for all 0-tick channels."""
-        for channel_id, channel in enumerate(self.channels):
+        for channel_id, channel in enumerate(self.song.channels):
             if not channel.enabled:
                 continue
             if channel.wait_ticks > 0:
                 channel.wait_ticks -= 1
             while channel.wait_ticks == 0:
                 event: engine.Event = channel.event_queue[channel.program_ctr]
-                cmd_byte = event.cmd_byte
+                cmd = event.cmd
                 args = event.arg1, event.arg2
 
-                if cmd_byte in (Command.FINE, Command.PREV):
+                if cmd in (Command.FINE, Command.PREV):
                     channel.enabled = False
                     self.show_processor_exec('FINE', channel_id)
                     break
-                elif cmd_byte == Command.PRIO:
+                elif cmd == Command.PRIO:
                     channel.priority = args[0]
                     self.show_processor_exec(f'PRIO {channel.priority}',
                                              channel_id)
-                elif cmd_byte == Command.TEMPO:
-                    self.tempo = args[0] * 2
+                elif cmd == Command.TEMPO:
+                    self.tempo = args[0]
                     self.show_processor_exec(f'TEMPO {self.tempo}', channel_id)
-                elif cmd_byte == Command.KEYSH:
+                elif cmd == Command.KEYSH:
                     channel.transpose = args[0]
                     self.show_processor_exec(f'KEYSH {channel.transpose}',
                                              channel_id)
-                elif cmd_byte == Command.VOICE:
+                elif cmd == Command.VOICE:
                     channel.voice = args[0]
-                    channel.output_type = self.voices[channel.voice].output_type
+                    channel.type = self.song.voices[channel.voice].type
                     self.show_processor_exec(
-                        f'VOICE {channel.voice} ({channel.output_type.name})',
+                        f'VOICE {channel.voice} ({channel.type.name})',
                         channel_id)
-                elif cmd_byte == Command.VOL:
+                elif cmd == Command.VOL:
                     channel.volume = args[0]
                     self.show_processor_exec(f'VOL {channel.volume}',
                                              channel_id)
                     output_volume = []
-                    for note_id in channel.notes_playing:
-                        note: engine.Note = self.note_arr[note_id]
-                        if not note.enable or note.parent_channel != channel_id:
-                            continue
-                        dav = 0
-                        if not channel.muted:
+                    if not channel.muted:
+                        for note_id in channel.notes_playing:
+                            note: engine.Note = self.note_arr[note_id]
                             vel = note.velocity / 0x7F
                             vol = channel.volume / 0x7F
                             pos = note.env_pos / 0xFF
                             dav = round(vel * vol * pos * 255)
-                        output_volume.append(dav)
-                        fmod.setVolume(note.fmod_channel, dav)
-                        self.debug_fmod_playback(f'NOTE VOLUME {dav}',
-                                                 channel_id, note_id)
-                    channel.output_volume = self.average_volumes(output_volume)
-                elif cmd_byte == Command.PAN:
+                            output_volume.append(dav)
+                            fmod.setVolume(note.fmod_channel, dav)
+                            self.debug_fmod_playback(f'NOTE VOLUME {dav}',
+                                                    channel_id, note_id)
+                        channel.output_volume = self.average_volumes(output_volume)
+                elif cmd == Command.PAN:
                     channel.panning = args[0]
                     panning = channel.panning * 2
                     self.show_processor_exec(f'PAN {channel.panning}',
                                              channel_id, channel.panning)
                     for note_id in channel.notes_playing:
                         note = self.note_arr[note_id]
-                        if not note.enable or note.parent_channel != channel_id:
-                            continue
                         fmod.setPan(note.fmod_channel, panning)
                         self.debug_fmod_playback('SET NOTE PANNING', channel_id,
                                                  note_id, panning)
-                elif cmd_byte in (Command.BEND, Command.BENDR):
-                    if cmd_byte == Command.BEND:
+                elif cmd in (Command.BEND, Command.BENDR):
+                    if cmd == Command.BEND:
                         channel.pitch_bend = args[0]
                         self.show_processor_exec(f'BEND {channel.pitch_bend}',
                                                  channel_id)
@@ -509,8 +469,6 @@ class Player(object):
                                                  channel_id)
                     for note_id in channel.notes_playing:
                         note: engine.Note = self.note_arr[note_id]
-                        if not note.enable or note.parent_channel != channel_id:
-                            continue
                         pitch = (channel.pitch_bend - 0x40
                                 ) / 0x40 * channel.pitch_range
                         frequency = round(note.frequency * math.pow(
@@ -518,15 +476,21 @@ class Player(object):
                         fmod.setFrequency(note.fmod_channel, frequency)
                         self.debug_fmod_playback('SET NOTE FREQ', channel_id,
                                                  note_id, frequency)
-                elif cmd_byte == Command.LFOS:
+                elif cmd == Command.LFOS:
                     channel.lfo_speed = args[0]
+                    for note_id in channel.notes_playing:
+                        note = self.note_arr[note_id]
+                        note.lfos_position = 0
                     self.show_processor_exec(f'LFOS {channel.lfo_speed}',
                                              channel_id)
-                elif cmd_byte == Command.MOD:
+                elif cmd == Command.MOD:
                     channel.mod_depth = args[0]
+                    for note_id in channel.notes_playing:
+                        note = self.note_arr[note_id]
+                        note.lfos_position = 0
                     self.show_processor_exec(f'MOD {channel.mod_depth}',
                                              channel_id)
-                elif cmd_byte == Note.EOT:
+                elif cmd == Note.EOT:
                     for note_id in channel.notes_playing:
                         note: engine.Note = self.note_arr[note_id]
                         if note.note_num != args[0] and args[0] != 0:
@@ -534,106 +498,100 @@ class Player(object):
                         note.note_off = True
                         self.show_processor_exec(
                             f'EOT {Key(args[0]).name} ({note_id})', channel_id)
-                elif cmd_byte == Command.GOTO:
-                    channel.program_ctr = channel.loop_ptr
-                    self.show_processor_exec(f'GOTO 0x{channel.loop_ptr:X}',
+                elif cmd == Command.GOTO:
+                    channel.program_ctr = channel.loop_address
+                    self.show_processor_exec(f'GOTO 0x{channel.loop_address:X}',
                                              channel_id)
                     continue
-                elif Note.N96 >= cmd_byte >= Note.TIE:
-                    if cmd_byte == Note.TIE:
+                elif Note.N96 >= cmd >= Note.TIE:
+                    if cmd == Note.TIE:
                         ll = -1
                     else:
-                        ll = int(Note(cmd_byte).name[1:])  # pylint: disable=E1136
+                        ll = int(str(Note(cmd).name)[1:])
                     nn, vv = event.arg1, event.arg2
                     self.note_queue.append(
                         engine.Note(nn, vv, channel_id, ll,
                                     channel.voice))
                     self.show_processor_exec(
-                        f'{Note(cmd_byte).name} {Key(nn).name} {Velocity(vv).name}',
+                        f'{Note(cmd).name} {Key(nn).name} {Velocity(vv).name}',
                         channel_id)
-                elif Wait.W00 <= cmd_byte <= Wait.W96:
-                    channel.wait_ticks = int(Wait(cmd_byte).name[1:])
+                elif Wait.W00 <= cmd <= Wait.W96:
+                    channel.wait_ticks = int(str(Wait(cmd).name)[1:])
                     self.show_processor_exec(f'WAIT {channel.wait_ticks}',
                                              channel_id)
-                elif cmd_byte == 0xCD:
+                elif cmd == 0xCD:
                     if args[0] == 0x08:
+                        channel.echo_volume = args[1]
                         self.show_processor_exec(f'XCMD xIECV {args[1]}',
                                                  channel_id)
                     elif args[0] == 0x09:
+                        channel.echo_len = args[1]
                         self.show_processor_exec(f'XCMD xIECL {args[1]}',
                                                  channel_id)
                 else:
                     try:
-                        com = Command(cmd_byte)
-                        self.show_processor_exec(com.name, channel_id)
+                        unk_cmd = Command(cmd)
+                        self.show_processor_exec(unk_cmd.name, channel_id)
                     except:
-                        self.show_processor_exec(f'UNKNOWN (0x{cmd_byte:X})',
+                        self.show_processor_exec(f'UNKNOWN (0x{cmd:X})',
                                                  channel_id)
                 channel.program_ctr += 1
 
-    def set_note(self, note: engine.Note, direct: engine.Direct):
-        """Assign a Direct's output and environment properties to a note."""
-        note.output_type = direct.output_type
-        note.attack = direct.attack
-        note.decay = direct.decay
-        note.sustain = direct.sustain
-        note.release = direct.release
-
     def get_playback_data(self, note: engine.Note):
         """Get the sample ID and frequency of a note from the sample pool."""
+        SAMPLED = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
+        SQUARE = (engine.DirectTypes.SQUARE1, engine.DirectTypes.SQUARE2)
         voice_id = note.voice
         note_num = note.note_num
-        standard = (engine.DirectTypes.DIRECT, engine.DirectTypes.WAVEFORM)
-        square = (engine.DirectTypes.SQUARE1, engine.DirectTypes.SQUARE2)
-        out_type = self.voices[voice_id].output_type
-        voice = self.voices[voice_id]
+        voice = self.song.voices[voice_id]
+        out_type = voice.type
         if out_type in (engine.ChannelTypes.MULTI, engine.ChannelTypes.DRUMKIT):
             if out_type == engine.ChannelTypes.MULTI:
-                voice: engine.Direct = voice.directs[voice.keymaps[
+                voice: engine.Voice = voice.voice_table[voice.keymap[
                     note_num]]
-                if voice.output_type in standard:
-                    sample_id = voice.bound_sample
-                    sample: engine.Sample = self.fmod_samples[sample_id]
-                    if voice.fix_pitch:
+                if voice.type in SAMPLED:
+                    sample_id = voice.sample_ptr
+                    sample: engine.Sample = self.song.samples[sample_id]
+                    if voice.resampled:
                         base_freq = sample.frequency
                     else:
-                        base_freq = engine.get_frequency(note_num, -2 if sample.gb_wave else sample.frequency)
+                        base_freq = engine.resample(note_num, -2 if sample.gb_wave else sample.frequency)
                 else:
                     sample_id = f'square{voice.psg_flag % 4}'
-                    base_freq = engine.get_frequency(note_num)
+                    base_freq = engine.resample(note_num)
             else:
-                voice: engine.Direct = self.voices[voice_id].directs[
+                voice: engine.Voice = self.song.voices[voice_id].voice_table[
                     note_num]
-                if voice.output_type in standard:
-                    sample_id = voice.bound_sample
-                    sample: engine.Sample = self.fmod_samples[sample_id]
-                    if voice.fix_pitch:
+                if voice.type in SAMPLED:
+                    sample_id = voice.sample_ptr
+                    sample: engine.Sample = self.song.samples[sample_id]
+                    if voice.resampled:
                         base_freq = sample.frequency
                     else:
-                        base_freq = engine.get_frequency(voice.drum_key, -2 if sample.gb_wave else sample.frequency)
-                elif voice.output_type in square:
+                        base_freq = engine.resample(voice.midi_key, -2 if sample.gb_wave else sample.frequency)
+                elif voice.type in SQUARE:
                     sample_id = f'square{voice.psg_flag % 4}'
-                    base_freq = engine.get_frequency(voice.drum_key)
-                elif voice.output_type == engine.DirectTypes.NOISE:
-                    sample_id = f'noise{voice.psg_flag % 2}{random.randint(0, 9)}'
-                    base_freq = engine.get_frequency(voice.drum_key)
+                    base_freq = engine.resample(voice.midi_key)
+                elif voice.type == engine.DirectTypes.NOISE:
+                    sample_id = f'noise{voice.psg_flag % 2}{random.randint(0, config.PSG_NOISE_SAMPLES - 1)}'
+                    base_freq = engine.resample(voice.midi_key)
             note.set_mixer_props(voice)
         else:
             note.set_mixer_props(voice)
-            midi_notenum = note_num + (60 - voice.drum_key)
-            if voice.output_type in standard:
-                sample_id = voice.bound_sample
-                base_freq = engine.get_frequency(
-                    midi_notenum, -1 if self.fmod_samples[sample_id].gb_wave
-                    else self.fmod_samples[sample_id].frequency)
-                if self.fmod_samples[sample_id].gb_wave:
+            midi_notenum = note_num + (60 - voice.midi_key)
+            if voice.type in SAMPLED:
+                sample_id = voice.sample_ptr
+                base_freq = engine.resample(
+                    midi_notenum, -1 if self.song.samples[sample_id].gb_wave
+                    else self.song.samples[sample_id].frequency)
+                if self.song.samples[sample_id].gb_wave:
                     base_freq /= 2
             else:
-                if voice.output_type in square:
+                if voice.type in SQUARE:
                     sample_id = f'square{voice.psg_flag % 4}'
-                elif voice.output_type == engine.DirectTypes.NOISE:
-                    sample_id = f'noise{voice.psg_flag % 2}{random.randint(0, 9)}'
-                base_freq = engine.get_frequency(midi_notenum)
+                elif voice.type == engine.DirectTypes.NOISE:
+                    sample_id = f'noise{voice.psg_flag % 2}{random.randint(0, config.PSG_NOISE_SAMPLES - 1)}'
+                base_freq = engine.resample(midi_notenum)
         return sample_id, base_freq
 
     def play_notes(self) -> None:
@@ -649,36 +607,27 @@ class Player(object):
         note is played by the FMOD player.
 
         """
-        volumes = [[] for i in range(len(self.channels))]
         for note in self.note_queue:
-            note_id = self.free_note()
+            note_id = self.free_note(self.song.channels[note.parent_channel].priority)
             if note_id is None:
                 continue
 
             self.note_arr[note_id] = note
-            channel = self.channels[note.parent_channel]
+            channel = self.song.channels[note.parent_channel]
             channel.notes_playing.append(note_id)
 
             sample_id, frequency = self.get_playback_data(note)
             if not sample_id:
-                return
+                continue
             frequency *= math.pow(config.SEMITONE_RATIO, config.TRANSPOSE)
             pitch = (channel.pitch_bend - 0x40) / 0x40 * channel.pitch_range
-            self.disable_notes(channel)
 
             output_frequency = round(
                 frequency * math.pow(config.SEMITONE_RATIO, pitch))
             output_panning = channel.panning * 2
-            if not channel.muted:
-                output_volume = round(
-                    (note.velocity / 0x7F) * (channel.volume / 0x7F) * 255)
-            else:
-                output_volume = 0
-            volumes[note.parent_channel].append(output_volume)
             note.frequency = frequency
             note.phase = engine.NotePhases.INITIAL
-            note.fmod_channel = fmod.playSound(
-                note_id, self.fmod_samples[sample_id].fmod_id, None, True)
+            note.fmod_channel = fmod.playSound(note_id, self.song.samples[sample_id].fmod_id, None, True)
             self.debug_fmod_playback('PLAY NOTE', note.parent_channel, note_id)
             fmod.setFrequency(note.fmod_channel, output_frequency)
             self.debug_fmod_playback('SET FREQUENCY', note.parent_channel,
@@ -689,12 +638,9 @@ class Player(object):
             fmod.setPaused(note.fmod_channel, False)
             self.debug_fmod_playback('UNPAUSE NOTE', note.parent_channel,
                                      note_id)
-
-        for chan_id, vol in enumerate(map(self.average_volumes, volumes)):
-            self.channels[chan_id].output_volume = vol
         self.note_queue.clear()
 
-    def update_notes(self) -> None:
+    def update_envelope(self) -> None:
         """Update the position of all enabled notes.
 
         Each note has an attenuation, decay, sustain, and release value set
@@ -727,86 +673,71 @@ class Player(object):
             INT((VELOCITY / 0x7F) *  (CHANNEL_VOL / 0x7F) * (POS / 0xFF) * 255)
 
         """
-        volumes = [[] for i in range(len(self.channels))]
+        volumes = [[] for i in range(len(self.song.channels))]
         for note_id, note in enumerate(self.note_arr):
-            channel = self.channels[note.parent_channel]
+            channel = self.song.channels[note.parent_channel]
             if not note.enable:
                 continue
 
             if note.note_off and note.phase < engine.NotePhases.RELEASE:
-                note.env_step = 0
+                note.env_step = note.release / 256
+                if note.type != engine.NoteTypes.DIRECT:
+                    note.env_step *= 32
+                note.env_dest = 0
                 note.phase = engine.NotePhases.RELEASE
-
-            if note.env_step == 0 or (note.env_pos == note.env_dest) or (
-                    note.env_step <= 0 and note.env_pos <= note.env_dest) or (
-                        note.env_step >= 0 and note.env_pos >= note.env_dest):
-                output, phase = note.output_type, note.phase
-                if phase == engine.NotePhases.INITIAL:
-                    note.phase = engine.NotePhases.ATTACK
-                    note.env_pos = 0
-                    note.env_dest = 255
-                    if output > engine.NoteTypes.DIRECT:
-                        note.env_step = (0x8 - note.attack) * 32 * (0x7F / (
-                            note.velocity + 1))
-                    else:
-                        note.env_step = note.attack
-                elif phase == engine.NotePhases.ATTACK:
-                    note.phase = engine.NotePhases.DECAY
+            if note.phase == engine.NotePhases.INITIAL:
+                note.env_pos = 0
+                note.env_dest = 255
+                if note.type != engine.NoteTypes.DIRECT:
+                    note.env_step = (0x8 - note.attack) * 32
+                else:
+                    note.env_step = note.attack
+                note.phase = engine.NotePhases.ATTACK
+            if note.phase == engine.NotePhases.ATTACK:
+                note.env_pos += note.env_step
+                if note.env_pos >= 255:
+                    note.env_pos = 255
                     note.env_dest = note.sustain
-                    if output > engine.NoteTypes.DIRECT:
+                    note.env_step = note.decay / 256
+
+                    if note.type != engine.NoteTypes.DIRECT:
                         note.env_dest *= 17
-                        if not note.decay:
-                            note.env_step = 0
-                        else:
-                            note.env_step = (note.decay - 0x8) * 32 * (
-                                0x7F / note.velocity)
-                    else:
-                        note.env_step = (note.decay - 0x100)
-                elif phase == engine.NotePhases.DECAY:
+                        note.env_step *= 32
+                    note.phase = engine.NotePhases.DECAY
+            if note.phase == engine.NotePhases.DECAY:
+                note.env_pos *= note.env_step
+                if note.env_pos <= note.sustain:
+                    note.env_pos = note.sustain
+                    if note.type != engine.NoteTypes.DIRECT:
+                        note.env_pos *= 17
                     note.phase = engine.NotePhases.SUSTAIN
+            if note.phase == engine.NotePhases.RELEASE:
+                note.env_pos *= note.env_step
+                if int(note.env_pos) <= 1:
                     note.env_step = 0
-                elif phase == engine.NotePhases.SUSTAIN:
-                    note.env_step = 0
-                elif phase == engine.NotePhases.RELEASE:
                     note.phase = engine.NotePhases.NOTEOFF
-                    note.env_dest = 0
-                    if output > engine.NoteTypes.DIRECT:
-                        if not note.release:
-                            note.env_step = -255
-                        else:
-                            note.env_step = (note.release - 0x8) * 32 * (
-                                0x7F / note.velocity)
-                    else:
-                        note.env_step = (note.release - 0x100)
-                elif phase == engine.NotePhases.NOTEOFF:
-                    fmod.stopSound(note.fmod_channel)
-                    self.debug_fmod_playback('STOP NOTE', note.parent_channel,
-                                             note_id,
-                                             f'FCHAN: {note.fmod_channel}')
-                    note.fmod_channel = 0
-                    note.enable = False
-                    note.lfos_position = 0
-                    note.parent_channel = -1
-                    channel.notes_playing.remove(note_id)
-
-            delta_pos = note.env_pos + note.env_step
-            if delta_pos > note.env_dest and note.env_step > 0 or delta_pos < note.env_dest and note.env_step < 0:
-                delta_pos = note.env_dest
-            note.env_pos = delta_pos
-
-            if channel.muted:
+            if note.phase == engine.NotePhases.NOTEOFF:
+                fmod.stopSound(note.fmod_channel)
+                self.debug_fmod_playback('STOP NOTE', note.parent_channel,
+                                        note_id,
+                                        f'FCHAN: {note.fmod_channel}')
+                note.fmod_channel = 0
+                note.enable = False
+                note.lfos_position = 0
+                note.parent_channel = -1
+                channel.notes_playing.remove(note_id)
                 continue
 
-            vel = note.velocity / 0x7F
-            vol = channel.volume / 0x7F
-            pos = note.env_pos / 0xFF
-            volume = round(vel * vol * pos * 255)
+            vel_ratio = note.velocity / 0x7F
+            vol_ratio = channel.volume / 0x7F
+            pos_ratio = note.env_pos / 0xFF
+            volume = round(vel_ratio * vol_ratio * pos_ratio * 255)
             volumes[note.parent_channel].append(volume)
             fmod.setVolume(note.fmod_channel, volume)
             self.debug_fmod_playback('SET NOTE VOLUME', note.parent_channel,
                                      note_id, volume)
 
-        for channel_id, channel in enumerate(self.channels):
+        for channel_id, channel in enumerate(self.song.channels):
             channel.output_volume = self.average_volumes(volumes[channel_id])
 
     def update_processor(self) -> int:
@@ -828,9 +759,8 @@ class Player(object):
         """
         self.update_channels()
         self.play_notes()
-        self.update_notes()
         self.advance_notes()
-        self.update_vibrato()
+
 
     def average_volumes(self, volumes: typing.List[int]) -> int:
         if not len(volumes):
@@ -838,10 +768,10 @@ class Player(object):
         return round(sum(volumes) / len(volumes))
 
     def play_song(self, fpath: str, song_num: int,
-                  song_table: int = None) -> None:
+                  song_table: int = None, mixer_override: romio.SoundEngine=None) -> None:
         """Play a song in the specified ROM."""
         d = parser.Parser()
-        song = d.get_song(fpath, song_num, song_table)
+        song = d.load_song(fpath, song_num, song_table)
         if song == -1:
             print('Invalid/Unsupported ROM.')
             return
@@ -851,18 +781,24 @@ class Player(object):
         elif song == -3:
             print('Empty track.')
             return
-        self.reset_player()
-        self.channels = song.channels
-        self.fmod_samples = song.samples
-        self.voices = song.voices
-        self.echo_enabled = song.meta_data.echo_enabled  # pylint: disable=E1101
-        if self.echo_enabled:
-            self.echo = 127 - (song.meta_data.echo - 128)
+        if mixer_override is None:
+            mixer = d.file.get_sound_engine()
+            if mixer is None:
+                print('No mixer detected; using default settings.')
+                self.mixer = romio.parse_mixer(config.DEFAULT_MIXER)
+            else:
+                print('Using ROM mixer.')
+                self.mixer = mixer
         else:
-            self.echo = 127
+            print('Using custom mixer.')
+            self.mixer = mixer_override
+
+        d.file.close()
+        self.reset_player()
+        self.song = song
         self.init_player(fpath)
 
-        interface.print_header(self, song.meta_data)
+        interface.print_header(self, self.song.meta_data)
         self.execute_processor()
 
 
@@ -871,48 +807,40 @@ class Player(object):
 
         Notes
         -----
-            The loop delay is calculate based on the current tempo of the
-            event processor. In the event that the event processor's
-            runtime exceeds this delay, the loop immediately cycles and no
-            delay is.
-
-            The loop delay is calculated based on the following equation:
-
-            ROUND(FLOOR((1/TEMPO*2.5 - ELAPSED) * 1000) / 1000, 3)
-
-            Additionally, all functions used within the mainloop are
-            assigned local copies to avoid the global function
-            lookup upon a function call.
+            All functions used have assigned local copies.
 
         """
         FRAME_DELAY = 1 / config.PLAYBACK_FRAMERATE
         END_BUFFER = config.TICKS_PER_SECOND // 2
 
         # Local function copies
-        d = interface.display
-        e = self.update_processor
-        f = math.fabs
-        t = time.perf_counter
-        s = time.sleep
-        tick_ctr = 0.0
+        display = interface.display
+        update = self.update_processor
+        fabs = math.fabs
+        clock = time.perf_counter
+        sleep = time.sleep
+        tick_ctr = 0
         buffer = 0
         try:
             while buffer < END_BUFFER:
                 prev_ticks_per_frame = int(tick_ctr)
-                avg_ticks = (self.tempo / 2) / (config.TICKS_PER_SECOND / config.PLAYBACK_SPEED)
-                tick_ctr += round(avg_ticks, 2)
+                avg_ticks = self.tempo / (config.TICKS_PER_SECOND / config.PLAYBACK_SPEED)
+                tick_ctr += avg_ticks
                 ticks_per_frame = int(tick_ctr - prev_ticks_per_frame)
-                tick_ctr = math.fmod(tick_ctr, config.TICKS_PER_SECOND)
-                start_time = t()
-                d(self)
-                if not any(filter(lambda x: x.enabled or x.notes_playing, self.channels)):
+                if tick_ctr >= config.TICKS_PER_SECOND:
+                    tick_ctr = 0
+                start_time = clock()
+                display(self)
+                if not any(filter(lambda x: x.enabled or x.notes_playing, self.song.channels)):
                     buffer += avg_ticks
                 for _ in range(ticks_per_frame):
-                    e()
-                    d(self)
-                if round(FRAME_DELAY - (t() - start_time), 3) < 0:
+                    update()
+                    display(self)
+                self.update_envelope()
+                self.update_vibrato()
+                if round(FRAME_DELAY - (clock() - start_time), 3) < 0:
                     continue
-                s(f(round(FRAME_DELAY - (t() - start_time), 3)))
+                sleep(fabs(round(FRAME_DELAY - (clock() - start_time), 3)))
         except KeyboardInterrupt:
             pass
         finally:

@@ -5,7 +5,7 @@ import enum
 import math
 import typing
 
-import sappy.fileio as fileio
+import sappy.romio as romio
 import sappy.instructions as instructions
 import sappy.config as config
 
@@ -36,9 +36,6 @@ class DirectTypes(enum.IntEnum):
     SQUARE2 = 2
     WAVEFORM = 3
     NOISE = 4
-    UNK5 = 5
-    UNK6 = 6
-    UNK7 = 7
 
 
 class NoteTypes(enum.IntEnum):
@@ -72,7 +69,10 @@ class Type(object):
     def __str__(self):
         attr = []
         for name in self.__slots__:
-            obj = getattr(self, name)
+            try:
+                obj = getattr(self, name)
+            except:
+                continue
             try:
                 value = repr(obj)
             except:
@@ -90,7 +90,7 @@ class Channel(Type):
     def __init__(self):
         self.enabled: bool = True
         self.muted: bool = False
-        self.loop_ptr: int = 0
+        self.loop_address: int = 0
         self.volume: int = instructions.mxv
         self.panning: int = instructions.c_v
         self.voice: int = 0x00
@@ -105,88 +105,79 @@ class Channel(Type):
         self.mod_depth: int = 0
         self.lfo_speed: int = 0
         self.output_volume: int = 0
-        self.output_type: ChannelTypes = ChannelTypes.DIRECT
+        self.type: ChannelTypes = ChannelTypes.DIRECT
         self.event_queue: typing.List = []
         self.notes_playing: typing.List = []
 
-        # Unused
-        self.in_subroutine: bool = False
-        self.subroutine_ctr: int = 0
-        self.subroutine_loop_cnt: int = 1
-        self.subroutines: typing.List = []
-        self.return_ptr: int = 0
 
-
-class Direct(Type):
+class Voice(Type):
     """DirectSound instrument."""
-    __slots__ = ('reverse', 'fix_pitch', 'attack', 'decay', 'sustain',
-                 'release', 'raw0', 'raw1', 'psg_flag', 'gb2', 'gb3', 'gb4',
-                 'drum_key', 'bound_sample', 'output_type')
+    __slots__ = ('resampled', 'attack', 'decay', 'sustain', 'release',
+                 'psg_flag', 'midi_key', 'sample_ptr', 'type', 'time_len', 'sweep', 'panning')
 
-    def __init__(self):
-        self.fix_pitch: bool = False
-        self.attack: int = 0x00
-        self.decay: int = 0x00
-        self.sustain: int = 0x00
-        self.release: int = 0x00
-        self.psg_flag: int = 0x00
-        self.drum_key: int = 0x3C
-        self.bound_sample: str = ''
-        self.output_type: int = DirectTypes.DIRECT
-
-        # Unused
-        self.reverse: bool = False
-        self.raw0: int = 0x00
-        self.raw1: int = 0x00
-        self.gb2: int = 0x00
-        self.gb3: int = 0x00
-        self.gb4: int = 0x00
+    def __init__(self, voice_type: typing.Union[romio.PSGInstrument, romio.DirectSound]):
+        self.midi_key = voice_type.midi_key
+        self.attack = voice_type.attack
+        self.decay = voice_type.decay
+        self.sustain = voice_type.sustain
+        self.release = voice_type.release
+        if type(voice_type) == romio.PSGInstrument:
+            self.type = DirectTypes(voice_type.psg_channel & 0b111)
+            self.time_len = voice_type.time_len
+            self.sweep = voice_type.sweep
+            self.psg_flag = voice_type.flag
+            self.resampled = voice_type.psg_channel & 0x08 == 0x08
+            if self.type == DirectTypes.WAVEFORM:
+                self.sample_ptr = voice_type.flag
+        else:
+            self.type = DirectTypes.DIRECT
+            self.panning = voice_type.panning
+            self.sample_ptr = voice_type.sample_ptr
+            self.resampled = voice_type.sample_mode & 0x08 == 0x08
 
 
 class DrumKit(Type):
     """Represents a drumkit; contains a queue of DirectSound instruments."""
-    __slots__ = ('directs')
+    __slots__ = ('voice_table')
 
-    def __init__(self, directs: typing.Dict = {}):
-        self.directs = directs
+    def __init__(self, voice_table: typing.Dict = {}):
+        self.voice_table = voice_table
 
     @property
-    def output_type(self):
+    def type(self):
         return ChannelTypes.DRUMKIT
 
 
 class Event(Type):
     """Internal event."""
-    __slots__ = ('cmd_byte', 'arg1', 'arg2', 'arg3', 'ticks')
+    __slots__ = ('cmd', 'arg1', 'arg2', 'arg3')
 
     def __init__(
             self,
-            ticks: int = 0,
-            cmd_byte: int = 0,
+            cmd: int = 0,
             arg1: int = 0,
             arg2: int = 0,
             arg3: int = 0,
     ):
-        self.cmd_byte: int = cmd_byte
+        self.cmd: int = cmd
         self.arg1: int = arg1
         self.arg2: int = arg2
         self.arg3: int = arg3
-        self.ticks: int = ticks
 
     def __str__(self):
-        return f'0x{self.cmd_byte:X} 0x{self.arg1:X} 0x{self.arg2:X} 0x{self.arg3:X}'
+        return f'0x{self.cmd:X} 0x{self.arg1:X} 0x{self.arg2:X} 0x{self.arg3:X}'
 
 
 class Instrument(Type):
-    """Represents an instrument; uses a DirectSound queue to hold sound samples."""
-    __slots__ = ('directs', 'keymaps')
+    """Key split instrument."""
+    __slots__ = ('voice_table', 'keymap')
 
-    def __init__(self, directs: typing.Dict = {}, keymaps: typing.Dict = {}):
-        self.directs = directs
-        self.keymaps = keymaps
+    def __init__(self, voice_table: typing.Dict = {}, keymap: typing.Dict = {}):
+        self.voice_table = voice_table
+        self.keymap = keymap
 
     @property
-    def output_type(self):
+    def type(self):
         return ChannelTypes.MULTI
 
 
@@ -195,8 +186,8 @@ class Note(Type):
     __slots__ = ('enable', 'note_off', 'env_dest', 'env_pos', 'env_step',
                  'lfos_position', 'wait_ticks', 'attack', 'decay', 'release',
                  'sustain', 'fmod_channel', 'frequency', 'note_num',
-                 'parent_channel', 'voice', 'bound_sample',
-                 'output_type', 'phase', 'fmod_fx', 'velocity')
+                 'parent_channel', 'voice', 'sample_ptr',
+                 'type', 'phase', 'fmod_fx', 'velocity')
 
     def __init__(self,
                  note_num: int = 0,
@@ -221,27 +212,30 @@ class Note(Type):
         self.note_num: int = note_num
         self.parent_channel: int = parent
         self.voice: int = patch_num
-        self.bound_sample: str = ''
-        self.output_type: NoteTypes = NoteTypes.DIRECT
+        self.sample_ptr: str = ''
+        self.type: NoteTypes = NoteTypes.DIRECT
         self.phase: NotePhases = NotePhases.INITIAL
         self.velocity: int = velocity
 
-    def set_mixer_props(self, direct_sound: Direct) -> None:
-        props = direct_sound.output_type, direct_sound.attack, direct_sound.decay, direct_sound.sustain, direct_sound.release
-        self.output_type, self.attack, self.decay, self.sustain, self.release = props
+    def set_mixer_props(self, direct_sound: Voice) -> None:
+        props = direct_sound.type, direct_sound.attack, direct_sound.decay, direct_sound.sustain, direct_sound.release
+        self.type, self.attack, self.decay, self.sustain, self.release = props
 
 
 class Sample(Type):
     """Sound sample for use during playback."""
 
+    __slots__ = ('gb_wave', 'loop', 'fmod_id', 'frequency', 'loop_start',
+                 'size', 'smp_data')
+
     def __init__(self,
-                 smp_data: str,
+                 smp_data: typing.Union[typing.List, int],
                  size: int,
                  freq: int = 0,
                  fmod_id: int = 0,
                  loop_start: int = 0,
                  loop: bool = True,
-                 gb_wave: bool = True):
+                 gb_wave: bool = False):
         self.gb_wave: bool = gb_wave
         self.loop: bool = loop
         self.fmod_id: int = fmod_id
@@ -258,7 +252,7 @@ def get_note(midi_note: int) -> str:
     return f'{NOTES[note]}{"M" if octave < 0 else ""}{abs(octave)}'  # pylint: disable=E1101
 
 
-def get_frequency(midi_note: int, midc_freq: int = -1) -> int:
+def resample(midi_note: int, midc_freq: int = -1) -> int:
     """Retrieve the sound frequency in Hz of a MIDI note relative to C3."""
 
     note = midi_note - instructions.Key.Cn3
