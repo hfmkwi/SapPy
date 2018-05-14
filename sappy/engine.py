@@ -148,7 +148,7 @@ class DrumKit(Type):
         return ChannelTypes.DRUMKIT
 
 
-class Event(Type):
+class Command(Type):
     """Internal event."""
     __slots__ = ('cmd', 'arg1', 'arg2', 'arg3')
 

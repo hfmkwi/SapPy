@@ -361,14 +361,15 @@ class Player(object):
         "vibrato" enabled and are subsequently processed.
 
         Vibrato is simulated using a sine wave with a domain of
-        { x | x < 2} - representing the vibrato position - and range of
-        {y | -depth < y < depth} - representing the delta frequency
-        multiplier. A sine wave rather than a cosine wave is used to
-        initialize the base delta frequency of each note at 0.
+        { x | 0 <= x <= 254 } - representing the vibrato position - and range
+        of { y | -depth <= y <= depth } - representing the delta frequency
+        multiplier.
 
-        The delta frequency is calculated using the following equation:
+        Notes
+        -----
+            The delta frequency is calculated using the following equation:
 
-        SIN(POS * Ï€) * DEPTH
+            ROUND(DEPTH // RANGE * SIN(π * POS / 127))
 
         """
         for note in self.note_arr:
@@ -406,7 +407,7 @@ class Player(object):
             if channel.wait_ticks > 0:
                 channel.wait_ticks -= 1
             while channel.wait_ticks == 0:
-                event: engine.Event = channel.event_queue[channel.program_ctr]
+                event: engine.Command = channel.event_queue[channel.program_ctr]
                 cmd = event.cmd
                 args = event.arg1, event.arg2
 

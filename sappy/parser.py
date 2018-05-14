@@ -60,6 +60,7 @@ class Song(object):
     """A wrapper around a Sappy engine song."""
 
     def __init__(self):
+        """Initialize a blank song."""
         self.channels = []
         self.note_queue = {}
         self.samples = {}
@@ -108,7 +109,7 @@ class Parser(object):
             cmd = self.file.read()
             program_ctr += 1
             if Wait.W00 <= cmd <= Wait.W96: # Wxx
-                pass
+                continue
             elif cmd == Command.PATT: # PATT(ADDRESS) [NON-REPEATABLE]
                 program_ctr += 4
             elif cmd == Command.PEND: # PEND [NON-REPEATABLE]
@@ -131,8 +132,10 @@ class Parser(object):
                 pass
             elif cmd == Command.FINE or cmd == Command.PREV:
                 break
+            elif cmd == 0xCA:
+                continue
             else:
-                raise ValueError('invalid track')
+                raise ValueError(f'invalid cmd: {cmd:X}')
 
         return loop_offset
 
@@ -184,8 +187,7 @@ class Parser(object):
             if voice.type in HAS_SAMPLE:
                 self.get_sample(song, voice)
 
-    def load_tracks(self, header_ptr: int, table_ptr: int,
-                  num_tracks: int) -> engine.Channel:
+    def load_tracks(self, header_ptr: int, table_ptr: int, num_tracks: int) -> engine.Channel:
         """Load all track data for a channel."""
 
         song = Song()
@@ -223,13 +225,13 @@ class Parser(object):
                             voice = arg
                             self.load_instrument(song, table_ptr, voice, sub_voice)
                         last_cmd = cmd
-                    event_queue.append(engine.Event(cmd, arg))
+                    event_queue.append(engine.Command(cmd, arg))
                     track_pos += 2
                 elif cmd == Command.MEMACC:
                     op = self.file.read()
                     addr = self.file.read()
                     data = self.file.read()
-                    event_queue.append(engine.Event(cmd, op, addr, data))
+                    event_queue.append(engine.Command(cmd, op, addr, data))
                     track_pos += 4
                 elif cmd == Command.PEND:
                     if insub:
@@ -237,17 +239,17 @@ class Parser(object):
                         insub = False
                     else:
                         track_pos += 1
-                    event_queue.append(engine.Event(cmd))
+                    event_queue.append(engine.Command(cmd))
                 elif cmd == Command.PATT:
                     rpc = track_pos + 5
                     insub = True
                     track_pos = self.file.read_gba_pointer()
-                    event_queue.append(engine.Event(cmd))
+                    event_queue.append(engine.Command(cmd))
                 elif cmd == Command.XCMD:
                     last_cmd = cmd
                     ext = self.file.read()
                     arg = self.file.read()
-                    event_queue.append(engine.Event(cmd, ext, arg))
+                    event_queue.append(engine.Command(cmd, ext, arg))
                     track_pos += 2
                 elif cmd == Note.EOT:
                     last_cmd = cmd
@@ -255,10 +257,9 @@ class Parser(object):
                     track_pos += 1
                     if arg < 0x80:
                         track_pos += 1
-                        event_queue.append(
-                            engine.Event(cmd, arg))
+                        event_queue.append(engine.Command(cmd, arg))
                     else:
-                        event_queue.append(engine.Event(cmd, 0))
+                        event_queue.append(engine.Command(cmd, 0))
                 elif 0x00 <= cmd < 0x80 or Note.TIE <= cmd <= Note.N96:
                     if Note.TIE <= cmd <= Note.N96:
                         track_pos += 1
@@ -266,18 +267,16 @@ class Parser(object):
                     else:
                         if last_cmd <= Note.EOT:
                             if last_cmd == Note.EOT:
-                                event_queue.append(engine.Event(last_cmd, cmd))
+                                event_queue.append(engine.Command(last_cmd, cmd))
                             elif last_cmd == Command.VOICE:
                                 voice = cmd
                                 self.load_instrument(song, table_ptr, voice, sub_voice)
-                                event_queue.append(
-                                    engine.Event(last_cmd,
-                                                 voice))
+                                event_queue.append(engine.Command(last_cmd, voice))
                             elif last_cmd == Command.XCMD:
                                 arg = self.file.read()
-                                event_queue.append(engine.Event(last_cmd, cmd, arg))
+                                event_queue.append(engine.Command(last_cmd, cmd, arg))
                             else:
-                                event_queue.append(engine.Event(last_cmd, cmd))
+                                event_queue.append(engine.Command(last_cmd, cmd))
                             track_pos += 1
                             continue
                         else:
@@ -310,27 +309,23 @@ class Parser(object):
                                 group = last_group[cmd_num]
                                 read_command = True
                             sub_voice = note + transpose
-                            event = engine.Event(cmd,
-                                                 sub_voice, velocity,
-                                                 group)
+                            event = engine.Command(cmd, sub_voice, velocity, group)
                             event_queue.append(event)
                         else:
                             if not cmd_num:
                                 sub_voice = last_notes[cmd_num] + transpose
                                 event_queue.append(
-                                    engine.Event(cmd,
-                                                 sub_voice,
-                                                 last_velocity[cmd_num]))
+                                    engine.Command(cmd, sub_voice, last_velocity[cmd_num]))
                             read_command = True
 
                         self.load_instrument(song, table_ptr, voice, sub_voice)
                 elif Wait.W00 <= cmd <= Wait.W96:
-                    event_queue.append(engine.Event(cmd))
+                    event_queue.append(engine.Command(cmd))
                     track_pos += 1
                 if cmd in (Command.FINE, Command.GOTO, Command.PREV):
                     break
 
-            event_queue.append(engine.Event(cmd))
+            event_queue.append(engine.Command(cmd))
 
             song.channels.append(channel)
         return song
