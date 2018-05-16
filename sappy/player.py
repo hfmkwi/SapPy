@@ -681,7 +681,7 @@ class Player(object):
                 continue
 
             if note.note_off and note.phase < engine.NotePhases.RELEASE:
-                note.env_step = note.release / 256
+                note.env_step = round(note.release / 256, 4)
                 if note.type != engine.NoteTypes.DIRECT:
                     note.env_step *= 32
                 note.env_dest = 0
@@ -699,22 +699,22 @@ class Player(object):
                 if note.env_pos >= 255:
                     note.env_pos = 255
                     note.env_dest = note.sustain
-                    note.env_step = note.decay / 256
+                    note.env_step = round(note.decay / 256, 4)
 
                     if note.type != engine.NoteTypes.DIRECT:
                         note.env_dest *= 17
                         note.env_step *= 32
                     note.phase = engine.NotePhases.DECAY
             if note.phase == engine.NotePhases.DECAY:
-                note.env_pos *= note.env_step
+                note.env_pos = int(note.env_pos * note.env_step)
                 if note.env_pos <= note.sustain:
                     note.env_pos = note.sustain
                     if note.type != engine.NoteTypes.DIRECT:
                         note.env_pos *= 17
                     note.phase = engine.NotePhases.SUSTAIN
             if note.phase == engine.NotePhases.RELEASE:
-                note.env_pos *= note.env_step
-                if int(note.env_pos) <= 1:
+                note.env_pos = int(note.env_pos * note.env_step)
+                if note.env_pos <= 1:
                     note.env_step = 0
                     note.phase = engine.NotePhases.NOTEOFF
             if note.phase == engine.NotePhases.NOTEOFF:
