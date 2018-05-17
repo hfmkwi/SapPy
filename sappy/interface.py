@@ -77,11 +77,11 @@ NUM_BLOCKS = len(BLOCK_TABLE)
 
 PADDING = 2
 TITLE_TEXT = 'M4A ENGINE EMULATOR'
-TABLE = 'Song table: '
-SONG = 'Song address: '
-VOICE = 'Voice table: '
-ECHO = 'Reverb: '
-CHANNEL = 'Track '
+TABLE = 'Song table:'
+SONG = 'Song address:'
+VOICE = 'Voice table:'
+ECHO = 'Reverb:'
+CHANNEL = 'Track'
 TEMPO = 'BPM'
 
 
@@ -144,7 +144,6 @@ def update_interface(player) -> str:
             insert_edpt = len(vol_bar)
             column[:insert_edpt] = vol_bar
 
-
         if config.DISPLAY & 0b100: # Notes
             names = []
             active_notes = filter(lambda x: not player.note_arr[x].note_off, channel.notes_playing)
@@ -188,17 +187,17 @@ def get_player_info(player, meta_data) -> str:
 
     """
 
-    TITLE         = f'{VERTICAL} {TITLE_TEXT} {VERTICAL}'
     TITLE_TOP     = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>{TITLE_WIDTH + PADDING}}{DOWN_AND_LEFT}'
+    TITLE         = f'{VERTICAL} {TITLE_TEXT} {VERTICAL}'
     TITLE_BOTTOM  = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>{TITLE_WIDTH + PADDING}}{UP_AND_LEFT}'
     HEADER_TOP    = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{DOWN_AND_LEFT}'
-    HEADER_ROM    = f'{VERTICAL}{meta_data.rom_name:^{HEADER_WIDTH}}{VERTICAL}'
-    HEADER_CODE   = f'{VERTICAL}{meta_data.code:^{HEADER_WIDTH}}{VERTICAL}'
+    HEADER_ROM    = f'{VERTICAL} {meta_data.rom_name:^{HEADER_WIDTH - PADDING}} {VERTICAL}'
+    HEADER_CODE   = f'{VERTICAL} {meta_data.code:^{HEADER_WIDTH - PADDING}} {VERTICAL}'
     TOP           = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>{POINTER_WIDTH}}{DOWN_AND_LEFT}'
-    TABLE_POINTER = f'{VERTICAL}{TABLE:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.song_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
-    SONG_PTR      = f'{VERTICAL}{SONG:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.header_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
-    VOICE_PTR     = f'{VERTICAL}{VOICE:>{HEADER_WIDTH}}{VERTICAL}{f" 0x{meta_data.voice_ptr:X}":<{POINTER_WIDTH}}{VERTICAL}'
-    REVERB        = f'{VERTICAL}{ECHO:>{HEADER_WIDTH}}{VERTICAL}{f" {(meta_data.echo-instructions.mxv-1)/instructions.mxv:<2.0%}" if meta_data.echo_enabled else " DISABLED":<{POINTER_WIDTH}}{VERTICAL}'
+    TABLE_POINTER = f'{VERTICAL} {TABLE:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.song_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
+    SONG_PTR      = f'{VERTICAL} {SONG:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.header_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
+    VOICE_PTR     = f'{VERTICAL} {VOICE:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
+    REVERB        = f'{VERTICAL} {ECHO:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"{(meta_data.echo-instructions.mxv-1)/instructions.mxv:<2.0%}" if meta_data.echo_enabled else " DISABLED":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
     BOTTOM        = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{POINTER_WIDTH}}{UP_AND_LEFT}'
 
     info = '\n'.join(
@@ -211,14 +210,14 @@ def get_player_info(player, meta_data) -> str:
 def get_channel_table(player) -> str:
     header = []
     for chan_id in range(len(player.song.channels)):
-        header.append(f'{f"{CHANNEL}{chan_id}":^{config.CHANNEL_WIDTH + PADDING * 3}}')
+        header.append(f'{f"{CHANNEL} {chan_id}":^{config.CHANNEL_WIDTH + PADDING * 3}}')
     header.append(f'{TEMPO:^{TEMPO_WIDTH + PADDING}}')
     header = VERTICAL + VERTICAL.join(header) + VERTICAL
 
-    TOP = [f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + PADDING * 3}}'] * len(player.song.channels)
-    BOTTOM = [f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.channels)
-    top = DOWN_AND_RIGHT + DOWN_AND_HORIZONTAL.join(TOP) + TEMPO_TOP
-    bot = VERTICAL_AND_RIGHT + VERTICAL_AND_HORIZONTAL.join(BOTTOM) + TEMPO_BOTTOM
+    TOP = DOWN_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + PADDING * 3}}'] * len(player.song.channels))
+    BOTTOM = VERTICAL_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.channels))
+    top = DOWN_AND_RIGHT + TOP + TEMPO_TOP
+    bot = VERTICAL_AND_RIGHT + BOTTOM + TEMPO_BOTTOM
     return top + '\n' + header + '\n' + bot
 
 

@@ -831,14 +831,13 @@ class Player(object):
                 if tick_ctr >= config.TICKS_PER_SECOND:
                     tick_ctr = 0
                 start_time = clock()
-                display(self)
                 if not any(filter(lambda x: x.enabled or x.notes_playing, self.song.channels)):
                     buffer += avg_ticks
                 for _ in range(ticks_per_frame):
                     update()
-                    display(self)
                 self.update_envelope()
                 self.update_vibrato()
+                display(self)
                 if round(FRAME_DELAY - (clock() - start_time), 3) < 0:
                     continue
                 sleep(fabs(round(FRAME_DELAY - (clock() - start_time), 3)))
