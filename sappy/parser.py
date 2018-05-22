@@ -114,15 +114,15 @@ class Parser(object):
         elif voice_type == 0x40: # Multi
             voice_table = self.file.read_dword(self.file.address + 4)
             keymap_ptr = to_addr(self.file.read_dword())
-            midi_key = self.file.read(keymap_ptr + midi_key)
-            midi_voice_ptr = to_addr(voice_table + midi_key * 12)
+            midi_note = self.file.read(keymap_ptr + midi_key)
+            midi_voice_ptr = to_addr(voice_table + midi_note * 12)
             midi_voice_type = self.file.read(midi_voice_ptr)
             voice = self.load_voice(midi_voice_type, midi_voice_ptr)
             if voice_id not in song.voices:
-                song.voices[voice_id] = engine.Instrument({midi_key: voice}, {midi_key: midi_key})
+                song.voices[voice_id] = engine.Instrument({midi_note: voice}, {midi_key: midi_note})
             else:
-                song.voices[voice_id].voice_table[midi_key] = voice
-                song.voices[voice_id].keymap[midi_key] = midi_key
+                song.voices[voice_id].voice_table[midi_note] = voice
+                song.voices[voice_id].keymap[midi_key] = midi_note
         else: # Everything else
             if voice_id in song.voices:
                 return
