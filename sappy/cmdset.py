@@ -426,21 +426,21 @@ class Mod(enum.IntEnum):
 
 
 class MemAcc(enum.IntEnum):
-    set = 0
-    add = 1
-    sub = 2
-    mem_set = 3
-    mem_add = 4
-    mem_sub = 5
-    beq = 6
-    bne = 7
-    bhi = 8
-    bhs = 9
-    bls = 10
-    blo = 11
-    mem_beq = 12
-    mem_bne = 13
-    mem_bhi = 14
-    mem_bhs = 15
-    mem_bls = 16
-    mem_blo = 17
+    mem_set = 0
+    mem_add = 1
+    mem_sub = 2
+    mem_mem_set = 3
+    mem_mem_add = 4
+    mem_mem_sub = 5
+    mem_beq = 6
+    mem_bne = 7
+    mem_bhi = 8
+    mem_bhs = 9
+    mem_bls = 10
+    mem_blo = 11
+    mem_mem_beq = 12
+    mem_mem_bne = 13
+    mem_mem_bhi = 14
+    mem_mem_bhs = 15
+    mem_mem_bls = 16
+    mem_mem_blo = 17

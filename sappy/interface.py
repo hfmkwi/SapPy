@@ -1,10 +1,11 @@
 # -*- coding: utf-8 -*-
+"""CLI display and update functionality."""
 import sys
 import typing
 
 import sappy.config as config
 import sappy.engine as engine
-import sappy.instructions as instructions
+import sappy.cmdset as cmdset
 
 # Box characters
 LIGHT = 0
@@ -93,14 +94,14 @@ NOTE_WIDTH = 4
 TITLE_WIDTH = len(TITLE_TEXT)
 
 TYPE_OVERRIDE = {
-    engine.ChannelTypes.DIRECT: 'DSd',
-    engine.ChannelTypes.DRUMKIT: 'Drm',
-    engine.ChannelTypes.MULTI: 'Mul',
-    engine.ChannelTypes.NOISE: 'Nse',
-    engine.ChannelTypes.NULL: 'Nul',
-    engine.ChannelTypes.SQUARE1: 'Sq1',
-    engine.ChannelTypes.SQUARE2: 'Sq2',
-    engine.ChannelTypes.WAVEFORM: 'Wav'
+    engine.OutputType.DSOUND: 'DSd',
+    engine.OutputType.DRUM: 'Drm',
+    engine.OutputType.MULTI: 'Mul',
+    engine.OutputType.PSG_NSE: 'Nse',
+    engine.OutputType.NULL: 'Nul',
+    engine.OutputType.PSG_SQ1: 'Sq1',
+    engine.OutputType.PSG_SQ2: 'Sq2',
+    engine.OutputType.PSG_WAVE: 'Wav'
 }
 
 # Get width of longest type override
@@ -110,32 +111,24 @@ TEMPO_TOP = f'{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{TEMPO_WIDTH + PADDING}}{DOW
 TEMPO_BOTTOM = f'{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>{TEMPO_WIDTH + PADDING}}{VERTICAL_AND_LEFT}'
 
 
-def update_interface(player) -> str:
+def update_track_display(player) -> str:
     """Update the user interface with the player data.
-
-    The interface is divided into columns representing a channel each.
-    Each column contains the current note volume, a visual representaion
-    of the volume, all notes playing, and the number of remaining ticks.
 
     Notes
     -----
-        The Z-order of the elements in ascending order is:
-        bar, note/ticks, pan
-
-        Sample interface column:
-
-        | [  VOL/PAN  ] [NOTES] [TICKS] |
+        Z-order of output elements (ascending):
+        Volume bar, notes, ticks, pan gauge
 
     """
     MAX_VOLUME = 255
     lines = []
-    for channel in player.song.channels:
-        channel: engine.Channel
+    for channel in player.song.tracks:
+        channel: engine.Track
         column = [" "] * config.CHANNEL_WIDTH
         vol_bar = ''
 
         if config.DISPLAY & 0b1: # Volume bar
-            bars, vol_intvl = divmod(channel.output_volume, MAX_VOLUME / config.CHANNEL_WIDTH)
+            bars, vol_intvl = divmod(channel.out_vol, MAX_VOLUME / config.CHANNEL_WIDTH)
 
             bar_intvl = MAX_VOLUME / (config.CHANNEL_WIDTH * NUM_BLOCKS)
             end_bar = BLOCK_TABLE.get(NUM_BLOCKS - (vol_intvl // bar_intvl), '')
@@ -145,22 +138,26 @@ def update_interface(player) -> str:
             column[:insert_edpt] = vol_bar
 
         if config.DISPLAY & 0b100: # Notes
-            names = []
-            active_notes = filter(lambda x: not player.note_arr[x].note_off, channel.notes_playing)
-            notes = list(map(lambda x: engine.get_note(player.note_arr[x].note_num), active_notes))
-            names = ''.join([f'{note:>{NOTE_WIDTH}}' for note in notes][:config.CHANNEL_WIDTH // NOTE_WIDTH - 1])
-            insert_stpt = config.CHANNEL_WIDTH - len(names) - NOTE_WIDTH
-            insert_edpt = insert_stpt + len(names)
-            column[insert_stpt:insert_edpt] = names
+            active_notes = filter(lambda x: not player.note_arr[x].note_off, channel.used_notes)
+            notes = map(lambda x: engine.get_note_name(player.note_arr[x].midi_note), active_notes)
+            insert_pt = config.CHANNEL_WIDTH - NOTE_WIDTH - PADDING
+            if config.DISPLAY & 0b1000:
+                insert_pt -= TICK_WIDTH
+            for note in notes:
+                insert_pt += NOTE_WIDTH - len(note)
+                if insert_pt < 0:
+                    break
+                column[insert_pt:insert_pt+len(note)] = note
+                insert_pt -= len(note) + PADDING + 1
 
         if config.DISPLAY & 0b1000:
-            insert_stpt = config.CHANNEL_WIDTH - TICK_WIDTH - 1
-            insert_edpt = insert_stpt + TICK_WIDTH
-            column[insert_stpt:insert_edpt] = f'{channel.wait_ticks:{TICK_WIDTH}}'
+            tick_label = str(channel.wait_ticks)
+            insert_stpt = config.CHANNEL_WIDTH - 1 - len(tick_label)
+            column[insert_stpt:insert_stpt + len(tick_label)] = tick_label
 
         if config.DISPLAY & 0b10: # Panning
             column[config.CHANNEL_WIDTH // 2] = VERTICAL
-            insert_pt = round(channel.panning * (config.CHANNEL_WIDTH - 1) / instructions.mxv)
+            insert_pt = round(channel.panning * (config.CHANNEL_WIDTH - 1) / cmdset.mxv)
             column[insert_pt] = chr(0x2573)
 
         column = ''.join(column)
@@ -172,21 +169,15 @@ def update_interface(player) -> str:
 
 
 def print_exit_message(player) -> None:
+    """Close off the track display and display an exit message."""
     sys.stdout.write('\n')
-    seperator = [f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.channels)
+    seperator = [f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.tracks)
     exit_str = UP_AND_RIGHT + UP_AND_HORIZONTAL.join(seperator) + f'{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{TEMPO_WIDTH + PADDING}}{UP_AND_LEFT}'
     sys.stdout.write('\n'.join((exit_str, 'Exiting...')))
-    return
 
 
 def get_player_info(player, meta_data) -> str:
-    """Construct the interface header.
-
-    Constructs a column-based display, with each column representing one
-    channel. Each column contains the channel's ID and output type.
-
-    """
-
+    """Construct the CLI interface header."""
     TITLE_TOP     = f'{DOWN_AND_RIGHT}{"":{HORIZONTAL}>{TITLE_WIDTH + PADDING}}{DOWN_AND_LEFT}'
     TITLE         = f'{VERTICAL} {TITLE_TEXT} {VERTICAL}'
     TITLE_BOTTOM  = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>{TITLE_WIDTH + PADDING}}{UP_AND_LEFT}'
@@ -195,39 +186,41 @@ def get_player_info(player, meta_data) -> str:
     HEADER_CODE   = f'{VERTICAL} {meta_data.code:^{HEADER_WIDTH - PADDING}} {VERTICAL}'
     TOP           = f'{VERTICAL_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{VERTICAL_AND_HORIZONTAL}{"":{HORIZONTAL}>{POINTER_WIDTH}}{DOWN_AND_LEFT}'
     TABLE_POINTER = f'{VERTICAL} {TABLE:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.song_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
-    SONG_PTR      = f'{VERTICAL} {SONG:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.header_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
+    SONG_PTR      = f'{VERTICAL} {SONG:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.main_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
     VOICE_PTR     = f'{VERTICAL} {VOICE:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"0x{meta_data.voice_ptr:X}":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
-    REVERB        = f'{VERTICAL} {ECHO:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"{(meta_data.echo-instructions.mxv-1)/instructions.mxv:<2.0%}" if meta_data.echo_enabled else " DISABLED":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
+    REVERB        = f'{VERTICAL} {ECHO:>{HEADER_WIDTH - PADDING}} {VERTICAL} {f"{(meta_data.reverb-cmdset.mxv-1)/cmdset.mxv:<2.0%}" if meta_data.echo_enabled else "DISABLED":<{POINTER_WIDTH - PADDING}} {VERTICAL}'
     BOTTOM        = f'{UP_AND_RIGHT}{"":{HORIZONTAL}>{HEADER_WIDTH}}{UP_AND_HORIZONTAL}{"":{HORIZONTAL}>{POINTER_WIDTH}}{UP_AND_LEFT}'
 
     info = '\n'.join(
         (TITLE_TOP, TITLE, TITLE_BOTTOM, HEADER_TOP, HEADER_ROM, HEADER_CODE,
          TOP, TABLE_POINTER, SONG_PTR, VOICE_PTR, REVERB, BOTTOM)) + '\n'
 
-    return info + get_channel_table(player)
+    return info + generate_track_display(player)
 
 
-def get_channel_table(player) -> str:
+def generate_track_display(player) -> str:
+    """Draw the table around the track display."""
     header = []
-    for chan_id in range(len(player.song.channels)):
-        header.append(f'{f"{CHANNEL} {chan_id}":^{config.CHANNEL_WIDTH + PADDING * 3}}')
+    for chan_id in range(len(player.song.tracks)):
+        header.append(f'{f" {CHANNEL} {chan_id} ":>{config.CHANNEL_WIDTH + PADDING * 3}}')
     header.append(f'{TEMPO:^{TEMPO_WIDTH + PADDING}}')
     header = VERTICAL + VERTICAL.join(header) + VERTICAL
 
-    TOP = DOWN_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + PADDING * 3}}'] * len(player.song.channels))
-    BOTTOM = VERTICAL_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.channels))
+    TOP = DOWN_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{config.CHANNEL_WIDTH + PADDING * 3}}'] * len(player.song.tracks))
+    BOTTOM = VERTICAL_AND_HORIZONTAL.join([f'{"":{HORIZONTAL}>{TYPE_WIDTH + PADDING}}{DOWN_AND_HORIZONTAL}{"":{HORIZONTAL}>{config.CHANNEL_WIDTH}}'] * len(player.song.tracks))
     top = DOWN_AND_RIGHT + TOP + TEMPO_TOP
     bot = VERTICAL_AND_RIGHT + BOTTOM + TEMPO_BOTTOM
     return top + '\n' + header + '\n' + bot
 
 
 def display(player) -> None:
-    """Update and display the interface."""
-    out = update_interface(player)
+    """Update and display track output."""
+    out = update_track_display(player)
     sys.stdout.write(out + '\r')
     sys.stdout.flush()
 
 
 def print_header(player, meta_data) -> None:
+    """Display ROM and track meta-data."""
     header = get_player_info(player, meta_data)
     sys.stdout.write(header + '\n')

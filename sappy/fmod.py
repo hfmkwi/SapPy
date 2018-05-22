@@ -12,7 +12,7 @@ LIBDIR = os.path.join(sys.path[0], 'lib')
 OS = platform.system()
 ARCH = platform.machine()
 
-if ARCH in ('AMD64', 'i386') and OS == 'Windows':
+if ARCH in ('AMD64', 'i386', 'i586') and OS == 'Windows':
     LIB = 'fmod.dll'
 elif ARCH == 'i386' and OS == 'Linux':
     LIB = 'libfmod.so.10'
@@ -162,7 +162,7 @@ class FSoundModes(enum.IntEnum):
     NORMAL = _16BITS | SIGNED | MONO
 
 
-class FSoundChannelSampleMode(enum.IntEnum):
+class FSoundtracksampleMode(enum.IntEnum):
     """Misc. flags for the FMOD API."""
 
     FREE = -1
@@ -173,48 +173,45 @@ class FSoundChannelSampleMode(enum.IntEnum):
     SYSTEMSAMPLE = -1000
 
 
-e = FModErrors
 FMOD_ERR_MESSAGES = {
-    e.NONE:
+    FModErrors.NONE:
     "No errors",
-    e.BUSY:
+    FModErrors.BUSY:
     "Cannot call this command after FSOUND_Init. Call FSOUND_Close first.",
-    e.UNINIT:
+    FModErrors.UNINIT:
     "Cannot call this command before FSOUND_Init.",
-    e.PLAY:
+    FModErrors.PLAY:
     "Cannot play the sound.",
-    e.INIT:
+    FModErrors.INIT:
     "Error initializing output device.",
-    e.ALLOC:
+    FModErrors.ALLOC:
     "The output device is already in use and cannot be reused.",
-    e.OUTPUT_FORMAT:
+    FModErrors.OUTPUT_FORMAT:
     "Soundcard does not support the features needed for this sound system (16bit stereo).",
-    e.COOP_LEVEL:
+    FModErrors.COOP_LEVEL:
     "Error setting cooperative level for hardware.",
-    e.CREATE_BUFFER:
+    FModErrors.CREATE_BUFFER:
     'Error creating hardware sound buffer.',
-    e.FILE_NOTFOUND:
+    FModErrors.FILE_NOTFOUND:
     "File not found.",
-    e.FILE_UNKFORMAT:
+    FModErrors.FILE_UNKFORMAT:
     "Unknown file format.",
-    e.FILE_BAD:
+    FModErrors.FILE_BAD:
     "Error loading file.",
-    e.MEMORY:
+    FModErrors.MEMORY:
     "Not enough memory.",
-    e.VERSION:
+    FModErrors.VERSION:
     "The version number of this file format is not supported.",
-    e.INV_PARAM:
+    FModErrors.INV_PARAM:
     "An invalid parameter was passed to this function.",
-    e.NO_EAX:
+    FModErrors.NO_EAX:
     "Tried to use an EAX command on a non-EAX enabled channel or output.",
-    e.CHANNEL_ALLOC:
+    FModErrors.CHANNEL_ALLOC:
     "Failed to allocate a new channel.",
-    e.RECORD:
+    FModErrors.RECORD:
     "Recording is not supported on this machine.",
-    e.MEDIAPLAYER:
+    FModErrors.MEDIAPLAYER:
     "Required MediaPlayer codec is not installed.",
-    e.CD_DEVICE:
+    FModErrors.CD_DEVICE:
     "An error occured trying to open the specified CD device."
 }
-
-del os, sys, typing

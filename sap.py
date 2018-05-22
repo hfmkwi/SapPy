@@ -19,8 +19,8 @@ def main():
     args = player.parse_args()
     mixer_code = int(args.mixer_override, 16)
     if mixer_code != config.DEFAULT_MIXER:
-        engine_mixer = romio.parse_mixer(mixer_code)
-        if not romio.check_mixer(engine_mixer):
+        engine_mixer = romio.parse_drivermode(mixer_code)
+        if not romio.check_drivermode(engine_mixer):
             print('Invalid mixer; using default mixer.')
             engine_mixer = None
     else:
