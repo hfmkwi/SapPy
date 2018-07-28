@@ -236,7 +236,7 @@ class CMDView(object):
     def update(self):
         self.pos = self.track.program_ctr
         self.prev_pos = self.track.base_ctr
-        self.pattern = not self.track.call_stack.empty()
+        self.pattern = bool(self.track.call_stack)
 
     def draw(self):
         view = self.track_data[self.prev_pos:self.prev_pos + self.HEIGHT]

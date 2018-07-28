@@ -227,11 +227,9 @@ class Player(object):
         M4A playback."""
         for track in self.tracks:
             if track.voice == M4ATrack.NO_VOICE:
-                continue
-            while not track.note_queue.empty():
-                note = track.note_queue.get_nowait()
+                track.note_queue.clear()
+            for note in track.note_queue:
                 sample_ptr, frequency = self.get_playback_data(note)
-
                 output_frequency = round(frequency * track.frequency)
                 output_panning = track.panning
                 note.frequency = frequency
@@ -244,6 +242,7 @@ class Player(object):
 
                 track.lfo_pos = 0
                 track.notes.append(note)
+            track.note_queue.clear()
 
     def execute_processor(self):
         """Execute M4A song instructions and update CLI display."""

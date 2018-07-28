@@ -99,8 +99,7 @@ class GOTO(M4ACommand):
 
     def __call__(self, track: M4ATrack):
         if not IGNORE_GOTO:
-            track.program_ctr = tuple(track.track_data.keys()).index(
-                self._pointer)
+            track.program_ctr = track.cmd_addresses.index(self._pointer)
             track.base_ctr = track.program_ctr
         else:
             track.program_ctr += 1
@@ -125,8 +124,8 @@ class PATT(M4ACommand):
         self._pointer = pointer
 
     def __call__(self, track: M4ATrack):
-        track.call_stack.put_nowait(track.program_ctr)
-        track.program_ctr = tuple(track.track_data.keys()).index(self._pointer)
+        track.call_stack.append(track.program_ctr)
+        track.program_ctr = track.cmd_addresses.index(self._pointer)
         track.base_ctr = track.program_ctr
 
     def __str__(self):
@@ -140,8 +139,8 @@ class PEND(M4ACommand):
         super().__init__(CMD.PEND)
 
     def __call__(self, track: M4ATrack):
-        if not track.call_stack.empty():
-            return_ctr = track.call_stack.get_nowait()
+        if track.call_stack:
+            return_ctr = track.call_stack.pop()
             track.program_ctr = track.base_ctr = return_ctr
         track.program_ctr += 1
 
@@ -599,7 +598,7 @@ class NOTE(M4ACommand):
 
     def __call__(self, track: M4ATrack):
         note = FMODNote(self.ticks, self.key, self.velocity, track.voice)
-        track.note_queue.put_nowait(note)
+        track.note_queue.append(note)
         track.program_ctr += 1
 
     def __str__(self):

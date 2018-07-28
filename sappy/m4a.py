@@ -2,11 +2,10 @@
 """Data-storage containers for internal use."""
 import copy
 import math
-from collections import OrderedDict
+from collections import OrderedDict, deque
 from enum import IntEnum
-from queue import Queue
 from random import random
-from typing import Dict, List, NamedTuple, Union, Tuple
+from typing import Dict, List, NamedTuple, Union, Tuple, Deque
 
 from .config import (BASE_FREQUENCY, PSG_SQUARE_FREQUENCY, PSG_SQUARE_VOLUME,
                      PSG_WAVEFORM_FREQUENCY, PSG_WAVEFORM_SIZE, SEMITONE_RATIO)
@@ -534,8 +533,8 @@ class M4ATrack(object):
         self.commands: Tuple = tuple(track_data.values())
         self.voices: Tuple[int] = ()
         self.notes: List[FMODNote] = []
-        self.note_queue: Queue[FMODNote] = Queue()
-        self.call_stack: Queue[int] = Queue(maxsize=3)
+        self.note_queue: Deque[FMODNote] = deque()
+        self.call_stack: Deque[int] = deque(maxlen=3)
 
         self.type: M4AVoiceMode = M4AVoiceMode.NULL
         self.voice: int = M4ATrack.NO_VOICE
