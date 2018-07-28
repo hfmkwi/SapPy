@@ -1,543 +1,347 @@
 # -*- coding: utf-8 -*-
-"""Player and engine emulation functionality."""
-import logging
-import math
-import os
-import random
-import time
-import typing
+"""M4A engine emulation functionality.
 
-import sappy.config as config
-import sappy.engine as engine
-import sappy.fmod as fmod
-import sappy.interface as interface
-import sappy.parser as parser
-import sappy.romio as romio
-from sappy.cmdset import Command, Key, Note, Velocity, Wait
+Attributes
+----------
+TEMP_FILE : str
+    Filename of temporary file used during sample loading.
+LOGGER : logging.Logger
+    Module-level logger
+
+"""
+from logging import basicConfig, getLogger, DEBUG, WARNING
+from os import remove
+from time import perf_counter
+from typing import Union
+
+# Local library imports
+from .config import (MAX_FMOD_TRACKS, PLAYBACK_FRAME_RATE, PLAYBACK_SPEED,
+                     SHOW_FMOD_EXECUTION, SHOW_PROCESSOR_EXECUTION,
+                     TICKS_PER_SECOND, CULL_FRAME_DELAY)
+from .exceptions import BlankSong, InvalidROM, InvalidSongNumber
+from .fmod import (FSampleMode, FSoundMode, fmod_init, get_error, load_sample,
+                   play_sound, set_loop_points, set_master_volume, set_output,
+                   set_paused, stop_sound, fmod_close)
+from .inst_set import KeyArg
+from .interface import Display
+from .m4a import (FMODNote, M4ADirectSound, M4ADirectSoundSample, M4ADrum,
+                  M4AKeyZone, M4ANoise, M4ASample, M4ASong, M4ASquare1,
+                  M4ASquare2, M4ATrack, M4AWaveform, resample)
+from .parser import Parser
 
 TEMP_FILE = 'temp'
+LOGGER = getLogger(__name__)
+LOGGER.setLevel(DEBUG)
 
 
 class Player(object):
-    """M4A Engine Interpreter."""
+    """Interprets translated M4A commands and emulates M4A engine functionality.
 
-    logging.basicConfig(level=logging.DEBUG)
-    PROCESSOR_LOGGER = logging.getLogger('PROCESSOR')
-    FMOD_LOGGER = logging.getLogger('FMOD')
-    if not config.SHOW_PROCESSOR_EXECUTION:
-        PROCESSOR_LOGGER.setLevel(logging.WARNING)
-    if not config.SHOW_FMOD_EXECUTION:
-        FMOD_LOGGER.setLevel(logging.WARNING)
+    Attributes
+    ----------
+    Player.PROCESSOR_LOGGER : Logger
+        Class-level logger exclusively for the M4A engine.
+    Player.FMOD_LOGGER : Logger
+        Class-level logger exclusively for the FMOD library.
+    _global_vol : int
+        Controls global volume of FMOD player; determined at run-time
+        by the `SoundDriverMode` construct.
+    samples : Dict[Union[int, str], M4ASample]
+        Dictionary of sample constructs from `M4ASong`.
+    voices : Dict[int, M4AVoice]
+        Dictionary of voice constructs from `M4ASong`.
+    tracks : List[M4ATrack]
+        List of tracks from `M4ASong`.
+    song : M4ASong
+        Song entry loaded from ROM.
+    frame_ctr : int
+        Global frame counter.
+
+    """
+
+    basicConfig(level=DEBUG)
+    PROCESSOR_LOGGER = getLogger('PROCESSOR')
+    FMOD_LOGGER = getLogger('FMOD')
+    if not SHOW_PROCESSOR_EXECUTION:
+        PROCESSOR_LOGGER.setLevel(WARNING)
+    if not SHOW_FMOD_EXECUTION:
+        FMOD_LOGGER.setLevel(WARNING)
 
     def __init__(self):
-        """Intialize the interpreter to default state.
-
-        Attributes
-        ----------
-        _global_vol : int
-            Controls global volume of FMOD player; determined at run-time
-            by the SoundDriverMode call.
-
-        tempo : int
-            Tempo of song in engine ticks/second.
-
-        note_arr : typing.List[engine.Note]
-            Programmable notes used during playback.
-
-        song : engine.Song
-            Song loaded by the parser.
-
-        """
         self._global_vol = 0
-        self.tempo = 75
-        self.note_arr = [engine.Note(*[None] * 5) for _ in range(config.MAXIMUM_NOTES)]
-        self.song = engine.Song()
+        self.song = M4ASong()
+        self.samples = self.song.samples
+        self.voices = self.song.voices
+        self.tracks = self.song.tracks
+        self.sdm = self.song.sdm
+        self.frame_ctr = 0
 
     @property
-    def global_vol(self) -> int:
-        """Global volume of the FMOD player."""
-        return self._global_vol
-
-    @global_vol.setter
-    def global_vol(self, volume: int) -> None:
-        self._global_vol = volume
-        fmod.setMasterVolume(self._global_vol)
-
-    def debug_fmod(self, action: str):
-        """Log FMOD debug information."""
-        self.FMOD_LOGGER.log(logging.DEBUG, f' Error: {fmod.getError():2} | {action:<16}')
-
-    def show_processor_exec(self, action: str, track_id: int):
-        """Log M4A processor information."""
-        self.PROCESSOR_LOGGER.log(logging.DEBUG, f' {action:^24} | Track: {track_id:2}')
-
-    def free_note(self, priority: int) -> int:
-        """Return the ID of an unused note.
-
-        If there are no more unused notes, disables the first note in
-        the track with the lowest priority in comparison to the given
-        priority.
+    def global_vol(self):
+        """Controls FMOD global volume.
 
         Returns
         -------
-        int[0 - 31]
-
+        int
+            FMOD global volume.
         """
-        unused = set(range(config.MAXIMUM_NOTES)).difference(self.song.used_notes)
-        if unused:
-            return unused.pop()
-        tracks = tuple(filter(lambda t: t.priority < priority and t.used_notes, self.song.tracks))
-        if tracks:
-            track = tracks[0]
-            note_id = track.used_notes[0]
-            note: engine.Note = self.note_arr[note_id]
-            note.mixer.reset()
-            track.used_notes.remove(note_id)
-            fmod.stopSound(note.fmod_channel)
-            return note_id
-        return None
+        return self._global_vol
 
-    def load_sample(self, fpath: str, sample: engine.Sample) -> int:
-        """Load a sample into the FMOD player.
+    @global_vol.setter
+    def global_vol(self, volume):
+        """Set FMOD master volume."""
+        self._global_vol = volume
+        set_master_volume(self._global_vol)
+
+    def debug_fmod(self, action: str):
+        """Log FMOD information."""
+        self.FMOD_LOGGER.log(DEBUG, f' Error: {get_error():2} | {action:<16}')
+
+    def debug_m4a(self, action: str, track_id: int):
+        """Log M4A processor information."""
+        self.PROCESSOR_LOGGER.log(DEBUG, f' {action:^24} | Track: {track_id:2}')
+
+    @staticmethod
+    def load_sample(rom_path, sample):
+        """Create sample handle in the FMOD player based on sample data.
 
         Parameters
         ----------
-        fpath
+        rom_path : str
             File path to the raw PCM8 sound sample
-        sample
+        sample : M4ASample
             Sample information
 
         Returns
         -------
         int
-            FMOD pointer.
+            FMOD sample handle.
 
         """
-        INDEX = fmod.FSoundtracksampleMode.FREE
-        MODE = fmod.FSoundModes._8BITS + fmod.FSoundModes.LOADRAW + fmod.FSoundModes.MONO
-        if sample.loops:
-            MODE += fmod.FSoundModes.LOOP_NORMAL
-        if sample.is_wave:
-            MODE += fmod.FSoundModes.UNSIGNED
+        index = FSampleMode.FREE
+        mode = FSoundMode.PCM8 + FSoundMode.RAW + FSoundMode.MONO
+        if sample.looped:
+            mode += FSoundMode.LOOP_NORMAL
+        if type(sample) == M4ADirectSoundSample:
+            mode += FSoundMode.SIGNED
         else:
-            MODE += fmod.FSoundModes.SIGNED
-        fpath = fpath.encode('ascii')
-        sample_id = fmod.sampleLoad(INDEX, fpath, MODE, 0, sample.size)
-        if sample.loops:
-            fmod.setLoopPoints(sample_id, sample.loop_start, sample.size - 1)
-        fmod.setDefaults(sample_id, sample.frequency, 0, -1, -1)
-        return sample_id
+            mode += FSoundMode.UNSIGNED
+        sample_handle = load_sample(index, rom_path, mode, 0, sample.size)
+        if sample.looped:
+            set_loop_points(sample_handle, sample.loop_start,
+                            sample.size - 1)
+        return sample_handle
 
-    # TODO: Add ability to known samples to avoid sample re-import
-    def load_directsound(self) -> None:
+    def load_samples(self):
         """Load requisite DirectSound samples."""
-        for sample in self.song.samples.values():
-            sample: engine.Sample
+        for sample in self.samples.values():
             with open(TEMP_FILE, 'wb') as f:
-                f.write(bytes(sample.sample_data))
-            sample.fmod_id = self.load_sample(TEMP_FILE, sample)
+                f.write(sample.sample_data)
+            sample.fmod_handle = self.load_sample(TEMP_FILE, sample)
         try:
-            os.remove(TEMP_FILE)
+            remove(TEMP_FILE)
         except FileNotFoundError:
             pass
 
-    def load_square(self) -> None:
-        """Load GBA PSGSquare1 and PSGSquare2 samples.
-
-        Notes
-        -----
-            Duty-cycles:
-            12.5%, 25%, 50%, 75%
-
-        """
-        VARIANT = int(0x7F * config.PSG_SQUARE_VOLUME)
-        LOW, HIGH = 0x80 - VARIANT, 0x80 + VARIANT
-
-        SQUARE_WAVES = (
-            [HIGH] * 1 + [LOW] * 7, # 12.5%
-            [HIGH] * 2 + [LOW] * 6, # 25%
-            [HIGH] * 4 + [LOW] * 4, # 50%
-            [HIGH] * 6 + [LOW] * 2  # 75%
-        )
-
-        for duty_cycle, wave_data in enumerate(SQUARE_WAVES):
-            square = f'square{duty_cycle}'
-            with open(square, 'wb') as f:
-                f.write(bytes(wave_data))
-            sample = engine.Sample(wave_data, config.PSG_SQUARE_SIZE, config.PSG_SQUARE_FREQUENCY, is_wave=True)
-            sample.fmod_id = self.load_sample(square, sample)
-            self.song.samples[square] = sample
-            os.remove(square)
-
-    def load_noise(self) -> None:
-        """Load GBA PSGNoise samples.
-
-        Notes
-        -----
-            Noise sample size:
-            32767 - normal
-            128 - metallic
-
-            10 samples are generated per size.
-
-        """
-        VOLUME_MULTI = round(64 * config.PSG_SQUARE_VOLUME)
-        for noise_ind, sample_size in enumerate((config.PSG_NOISE_NORMAL_SIZE, config.PSG_NOISE_METALLIC_SIZE)):
-            for sample_ind in range(config.PSG_NOISE_SAMPLES):
-                noise_data = [int(random.random() * VOLUME_MULTI) for _ in range(sample_size)]
-
-                noise = f'noise{noise_ind}{sample_ind}'
-                with open(noise, 'wb') as f:
-                    f.write(bytes(noise_data))
-                sample = engine.Sample(
-                    sample_data=noise_data,
-                    size=config.PSG_NOISE_NORMAL_SIZE,
-                    freq=config.PSG_SQUARE_FREQUENCY,
-                    is_wave=True,
-                )
-                sample.fmod_id = self.load_sample(noise, sample)
-                self.song.samples[noise] = sample
-
-                os.remove(noise)
-
-    def init_player(self) -> None:
+    def init_player(self):
         """Initialize FMOD player and load samples."""
-        fmod.setOutput(2)
+        set_output(1)
         self.debug_fmod('Set Output: DIRECTSOUND')
 
-        fmod.systemInit(self.engine.frequency, config.MAXIMUM_NOTES, 0)
-        self.debug_fmod(f'Init@{self.engine.frequency} Hz, {config.MAXIMUM_NOTES} tracks')
+        fmod_init(self.sdm.frequency, MAX_FMOD_TRACKS, 0)
+        self.debug_fmod(
+            f'Init@{self.sdm.frequency} Hz, {MAX_FMOD_TRACKS} tracks')
 
-        fmod.setMasterVolume(self.engine.volume * 17)
-        self.debug_fmod(f'Set Volume: {self.engine.volume * 17}')
+        set_master_volume(self.sdm.volume)
+        self.debug_fmod(f'Set Volume: {self.sdm.volume}')
 
-        self.load_directsound()
-        self.load_noise()
-        self.load_square()
+        self.load_samples()
 
-    def update_vibrato(self) -> None:
-        """Update note vibrato.
+    def play_song(self, path, song_id, table_ptr):
+        """Start emulation of an M4A song entry.
 
-        Notes
-        -----
-            Notes are only updated if the track
-            has LFO speed and depth set to a
-            non-zero integer.
+        Parameters
+        ----------
+        path : str
+            Path to GBA ROM.
+        song_id : int
+            Song entry number.
+        table_ptr : int
+            Address of M4A song table.
 
-        """
-        for track in filter(lambda c: c.enabled and c.lfos and c.mod, self.song.tracks):
-            for note in [self.note_arr[nid] for nid in track.used_notes]:
-                delta_freq = round(track.mod / track.pitch_range * math.sin(math.pi * note.lfo_pos / 127))
-                pitch = (track.pitch_bend + delta_freq - 0x40) / 0x40 * track.pitch_range
-                frequency = round(note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
-                fmod.setFrequency(note.fmod_channel, frequency)
-                note.lfo_pos += track.lfos
-                if note.lfo_pos >= 254:
-                    note.lfo_pos = 0
-
-    def update_tracks(self) -> None:
-        """Decrement track tick counter and execute track commands.
-
-        Notes
-        -----
-            Execution occurs when tick counter = 0.
+        Returns
+        -------
+        None
 
         """
-        # TODO: move all this to Track class
-        for track_id, track in enumerate(self.song.tracks):
-            if not track.enabled:
-                continue
-            track.advance()
-            while not track.wait_ticks:
-                event: engine.Command = track.track_data[track.program_ctr]
-                cmd = event.cmd
-                args = event.arg1, event.arg2
-
-                if cmd in (Command.FINE, Command.PREV):
-                    track.enabled = False
-                    self.show_processor_exec('FINE', track_id)
-                    break
-                elif cmd == Command.PRIO:
-                    track.priority = args[0]
-                    self.show_processor_exec(f'PRIO {track.priority}',
-                                             track_id)
-                elif cmd == Command.TEMPO:
-                    self.tempo = args[0]
-                    self.show_processor_exec(f'TEMPO {self.tempo}', track_id)
-                elif cmd == Command.KEYSH:
-                    track.keysh = args[0]
-                    self.show_processor_exec(f'KEYSH {track.keysh}',
-                                             track_id)
-                elif cmd == Command.VOICE:
-                    track.voice = args[0]
-                    track.type = self.song.voices[track.voice].type
-                    self.show_processor_exec(
-                        f'VOICE {track.voice} ({track.type.name})',
-                        track_id)
-                elif cmd == Command.VOL:
-                    track.volume = args[0]
-                    self.show_processor_exec(f'VOL {track.volume}',
-                                             track_id)
-                    if not track.muted:
-                        track.out_vol = 0
-                        for note_id in track.used_notes:
-                            note: engine.Note = self.note_arr[note_id]
-                            vel = note.velocity / 0x7F
-                            vol = track.volume / 0x7F
-                            pos = note.mixer.pos / 0xFF
-                            dav = round(vel * vol * pos * 255)
-                            track.out_vol += dav
-                            fmod.setVolume(note.fmod_channel, dav)
-                            self.debug_fmod(f'Note {note_id:2} Vol: {dav}')
-                        if track.used_notes:
-                            track.out_vol /= len(track.used_notes)
-                elif cmd == Command.PAN:
-                    track.panning = args[0]
-                    panning = track.panning * 2
-                    self.show_processor_exec(f'PAN {track.panning}', track_id)
-                    for note_id in track.used_notes:
-                        note = self.note_arr[note_id]
-                        fmod.setPan(note.fmod_channel, panning)
-                        self.debug_fmod(f'Note {note_id:2} Pan: {panning}')
-                elif cmd in (Command.BEND, Command.BENDR):
-                    if cmd == Command.BEND:
-                        track.pitch_bend = args[0]
-                        self.show_processor_exec(f'BEND {track.pitch_bend}', track_id)
-                    else:
-                        track.pitch_range = args[0]
-                        self.show_processor_exec(f'BENDR {track.pitch_range}', track_id)
-                    for note_id in track.used_notes:
-                        note: engine.Note = self.note_arr[note_id]
-                        pitch = (track.pitch_bend - 0x40) / 0x40 * track.pitch_range
-                        frequency = round(note.frequency * math.pow(config.SEMITONE_RATIO, pitch))
-                        fmod.setFrequency(note.fmod_channel, frequency)
-                        self.debug_fmod(f'Note {note_id:2} Freq (Hz): {frequency}')
-                elif cmd == Command.LFOS:
-                    track.lfos = args[0]
-                    self.show_processor_exec(f'LFOS {track.lfos}', track_id)
-                elif cmd == Command.MOD:
-                    track.mod = args[0]
-                    self.show_processor_exec(f'MOD {track.mod}', track_id)
-                elif cmd == Note.EOT:
-                    target_note = args[0]
-                    for note_id in track.used_notes:
-                        note: engine.Note = self.note_arr[note_id]
-                        if note.midi_note != target_note and target_note != 0:
-                            continue
-                        note.note_off = True
-                        self.show_processor_exec(f'EOT {Key(target_note).name} ({note_id})', track_id)
-                elif cmd == Command.GOTO:
-                    track.program_ctr = track.loop_ptr
-                    self.show_processor_exec(f'GOTO 0x{track.loop_ptr:X}', track_id)
-                    continue
-                elif Note.N96 >= cmd >= Note.TIE:
-                    if cmd == Note.TIE:
-                        ll = -1
-                    else:
-                        ll = int(str(Note(cmd).name)[1:])
-                    nn, vv = event.arg1, event.arg2
-                    note_id = self.free_note(track.priority)
-                    self.note_arr[note_id].reset(nn, vv, track_id, ll, track.voice)
-                    self.play_note(note_id)
-                    track.used_notes.append(note_id)
-                    self.show_processor_exec(f'{Note(cmd).name} {Key(nn).name} {Velocity(vv).name}',track_id)
-                elif Wait.W00 <= cmd <= Wait.W96:
-                    track.wait_ticks = int(str(Wait(cmd).name)[1:])
-                    self.show_processor_exec(f'WAIT {track.wait_ticks}', track_id)
-                elif cmd == Command.XCMD:
-                    ext = args[0]
-                    if ext == Command.xIECV:
-                        track.echo_volume = args[1]
-                        self.show_processor_exec(f'XCMD xIECV {track.echo_volume}', track_id)
-                    elif ext == Command.xIECL:
-                        track.echo_len = args[1]
-                        self.show_processor_exec(f'XCMD xIECL {track.echo_len}', track_id)
-                else:
-                    try:
-                        unimpl_cmd = Command(cmd)
-                        self.show_processor_exec(unimpl_cmd.name, track_id)
-                    except:
-                        self.show_processor_exec(f'UNKNOWN (0x{cmd:X})', track_id)
-                track.program_ctr += 1
-
-    def get_voice_data(self, note: engine.Note):
-        """Get voice sample and frequency and replace note mixer.
-
-        Notes
-        -----
-            Note receives a shallow copy of the the voice's mixer.
-
-        """
-        midi_note = note.midi_note
-        voice = self.song.voices[note.voice]
-        square_mod = -4
-
-        if voice.type in (engine.OutputType.MULTI, engine.OutputType.DRUM):
-            if voice.type == engine.OutputType.MULTI:
-                voice: engine.Voice = voice.voice_table[voice.keymap[midi_note]]
-                sample_key = midi_note
-            else:
-                voice: engine.Voice = voice.voice_table[midi_note]
-                sample_key = voice.midi_key
-        else:
-            sample_key = midi_note + (Key.Cn3 - voice.midi_key)
-
-        note.reset_mixer(voice)
-
-        if voice.type in (engine.SampleType.DSOUND, engine.SampleType.PSG_WAVE):
-            sample_ptr = voice.sample_ptr
-            sample: engine.Sample = self.song.samples[sample_ptr]
-            if voice.resampled:
-                base_freq = sample.frequency
-            else:
-                base_freq = engine.resample(sample_key, square_mod if sample.is_wave else sample.frequency)
-        elif voice.type in (engine.SampleType.PSG_SQ1, engine.SampleType.PSG_SQ2):
-            sample_ptr = f'square{voice.psg_flag % 4}'
-            base_freq = engine.resample(sample_key, square_mod)
-        else:
-            sample_ptr = f'noise{voice.psg_flag % 2}{int(random.random() * config.PSG_NOISE_SAMPLES)}'
-            base_freq = engine.resample(sample_key)
-        return sample_ptr, base_freq
-
-    def play_note(self, note_id: int) -> None:
-        """Play ."""
-        note = self.note_arr[note_id]
-        track = self.song.tracks[note.track]
-
-        sample_id, frequency = self.get_voice_data(note)
-        if not sample_id:
+        parser = Parser(path)
+        try:
+            song = parser.load_song(song_id, table_ptr)
+        except (InvalidROM, InvalidSongNumber, BlankSong) as e:
+            LOGGER.critical(e)
             return
-        frequency *= math.pow(config.SEMITONE_RATIO, config.TRANSPOSE)
-        pitch = (track.pitch_bend - 0x40) / 0x40 * track.pitch_range
-
-        output_frequency = round(frequency * math.pow(config.SEMITONE_RATIO, pitch))
-        output_panning = track.panning * 2
-        note.frequency = frequency
-        note.fmod_channel = fmod.playSound(note_id, self.song.samples[sample_id].fmod_id, None, True)
-        self.debug_fmod(f'Play Note {note_id:2} Track: {note.track}')
-        fmod.setFrequency(note.fmod_channel, output_frequency)
-        self.debug_fmod(f'Note {note_id:2} Freq (Hz): {output_frequency}')
-        fmod.setPan(note.fmod_channel, output_panning)
-        self.debug_fmod(f'Note {note_id:2} Pan: {output_panning}')
-        fmod.setPaused(note.fmod_channel, False)
-        self.debug_fmod(f'Unpause Note {note_id:2}')
-
-    def update_envelope(self) -> None:
-        """Update sound envelope for all notes.
-
-        Notes
-        -----
-            Volume equation:
-            ROUND((NOTE_VOL / 0x7F) *  (TRACK_VOL / 0x7F) * (ENV_POS / 0xFF) * 255)
-
-        """
-        for track in self.song.tracks:
-            track.out_vol = 0
-            for note_id in track.used_notes[::]:
-                note = self.note_arr[note_id]
-                if note.note_off:
-                    note.mixer.note_off()
-                pos = note.mixer.update()
-                if pos is None:
-                    fmod.stopSound(note.fmod_channel)
-                    self.debug_fmod(f'Stop Note {note_id:2}')
-                    track.used_notes.remove(note_id)
-                    continue
-
-                vel_ratio = note.velocity / 0x7F
-                vol_ratio = track.volume / 0x7F
-                pos_ratio = pos / 0xFF
-                volume = round(vel_ratio * vol_ratio * pos_ratio * 255)
-                track.out_vol += volume
-                fmod.setVolume(note.fmod_channel, volume)
-                self.debug_fmod(f'Note {note_id:2} Vol: {volume}')
-            if track.used_notes:
-                track.out_vol /= len(track.used_notes)
-
-    def update_processor(self) -> int:
-        """Execute one tick of the processor.
-
-        Notes
-        -----
-            Check for processor halt is done in main-loop.
-
-        """
-        self.update_tracks()
-        for note_id in self.song.used_notes:
-            self.note_arr[note_id].advance()
-
-    def play_song(self, path: str, song: int, table_ptr: int = None, engine: romio.SoundDriverMode=None) -> None:
-        """Play a song in the specified ROM."""
-        d = parser.Parser()
-        song = d.load_song(path, song, table_ptr)
-        if song == -1:
-            print('Invalid/Unsupported ROM.')
-            return
-        elif song == -2:
-            print('Invalid song number.')
-            return
-        elif song == -3:
-            print('Empty track.')
-            return
-        if engine is None:
-            engine = d.file.get_drivermode()
-            if engine is None:
-                print('No mixer detected; using default settings.')
-                self.engine = romio.parse_drivermode(config.DEFAULT_MIXER)
-            else:
-                print('Using ROM mixer.')
-                self.engine = engine
-        else:
-            print('Using custom mixer.')
-            self.engine = engine
-
-        d.file.close()
         self.song = song
+        self.tracks = song.tracks
+        self.samples = song.samples
+        self.voices = song.voices
+        self.sdm = song.sdm
         self.init_player()
 
-        interface.print_header(self, self.song.meta_data)
         self.execute_processor()
 
-
-    def execute_processor(self) -> None:
-        """Execute M4A engine and update CLI display.
+    def cull_notes(self):
+        """Remove all disabled FMOD channels and discard ADSR dead notes from
+        all tracks.
 
         Notes
         -----
-            All used non-builtin functions have local copies.
+            "Disabled" notes/channels are denoted as muted in the FMOD player to
+            avoid any accidental playback on unused channels.
+
+            This function is called indefinitely with a frame delay of
+            `CULL_FRAME_DELAY`.
 
         """
-        FRAME_DELAY = 1 / config.PLAYBACK_FRAMERATE
-        END_BUFFER = config.TICKS_PER_SECOND // 2
+        for track in self.tracks:
+            for note in track.notes[::]:
+                if note.muted:
+                    track.notes.remove(note)
+                    note.set_mute(False)
+                    stop_sound(note.fmod_handle)
 
-        display = interface.display
-        update = self.update_processor
-        fabs = math.fabs
-        clock = time.perf_counter
-        sleep = time.sleep
-        tick_ctr = 0
+    def execute_tracks(self, ticks):
+        """Process each track under a various tick rate.
+
+        Parameters
+        ----------
+        ticks : int
+            Ticks to execute each track.
+
+        """
+        for _ in range(ticks):
+            for track_id, track in enumerate(self.tracks):
+                track.update()
+
+    def play_notes(self):
+        """Empty all track note queues and open new FMOD channels to simulate
+        M4A playback."""
+        for track in self.tracks:
+            if track.voice == M4ATrack.NO_VOICE:
+                continue
+            while not track.note_queue.empty():
+                note = track.note_queue.get_nowait()
+                sample_ptr, frequency = self.get_playback_data(note)
+
+                output_frequency = round(frequency * track.frequency)
+                output_panning = track.panning
+                note.frequency = frequency
+                sample = self.samples[sample_ptr].fmod_handle
+                note.fmod_handle = play_sound(FSampleMode.FREE, sample, True)
+                note.set_frequency(output_frequency)
+                note.set_panning(output_panning)
+                note.set_volume(0)
+                set_paused(note.fmod_handle, False)
+
+                track.lfo_pos = 0
+                track.notes.append(note)
+
+    def execute_processor(self):
+        """Execute M4A song instructions and update CLI display."""
+        frame_delay = 1 / PLAYBACK_FRAME_RATE
+
         buffer = 0
-        try:
-            while buffer < END_BUFFER:
-                prev_ticks_per_frame = int(tick_ctr)
-                avg_ticks = round(self.tempo / round(config.TICKS_PER_SECOND / config.PLAYBACK_SPEED, 4), 4)
-                tick_ctr += avg_ticks
-                ticks_per_frame = int(tick_ctr - prev_ticks_per_frame)
-                if tick_ctr >= config.TICKS_PER_SECOND:
-                    tick_ctr = 0
-                start_time = clock()
-                if not any(filter(lambda x: x.enabled or x.used_notes, self.song.tracks)):
-                    buffer += avg_ticks
-                for _ in range(ticks_per_frame):
-                    update()
-                self.update_envelope()
-                self.update_vibrato()
-                display(self)
-                if round(FRAME_DELAY - (clock() - start_time), 3) < 0:
-                    continue
-                sleep(fabs(round(FRAME_DELAY - (clock() - start_time), 3)))
-        except KeyboardInterrupt:
-            pass
-        finally:
-            interface.print_exit_message(self)
-            fmod.systemClose()
+        display = Display(self.tracks)
+        ticker = Ticker()
+
+        while buffer < M4ATrack.TEMPO:
+            start_time = perf_counter()
+
+            self.frame_ctr += 1
+            self.frame_ctr %= CULL_FRAME_DELAY
+
+            ticks = ticker()
+            self.execute_tracks(ticks)
+            self.play_notes()
+            for track in self.tracks:
+                track.update_envelope()
+            if self.frame_ctr == 0:
+                self.cull_notes()
+            if not any(track.enabled for track in self.tracks):
+                buffer += ticks
+
+            code = display.update()
+            if code is False:
+                display.exit_scr()
+                fmod_close()
+                break
+            display.draw()
+            display.wait(frame_delay - (perf_counter() - start_time))
+
+    def get_playback_data(self, note):
+        """Retrieve the sample pointer and frequency of a note.
+
+        Parameters
+        ----------
+        note : FMODNote
+
+        Returns
+        -------
+        tuple of int
+            Sample pointer and note frequency.
+
+        """
+        voice = self.voices[note.voice]
+        if voice.mode == 0x40:
+            voice: M4AKeyZone
+            voice = voice.voice_table[voice.keymap[note.midi_note]]
+            sample_key = note.midi_note
+        elif voice.mode == 0x80:
+            voice: M4ADrum
+            voice = voice.voice_table[note.midi_note]
+            sample_key = voice.root
+        else:
+            sample_key = note.midi_note + (KeyArg.Cn3 - voice.root)
+        note.reset_mixer(voice)
+
+        if voice.mode in (0x0, 0x8, 0x3, 0xB):
+            voice: Union[M4ADirectSound, M4AWaveform]
+            sample_ptr = voice.sample_ptr
+            sample = self.samples[sample_ptr]
+            if voice.mode == 0x8:
+                frequency = sample.frequency
+            elif voice.mode in (0x3, 0xB):
+                frequency = resample(sample_key, -2)
+            else:
+                frequency = resample(sample_key, sample.frequency)
+        elif voice.mode in (0x1, 0x2, 0x9, 0xA):
+            voice: Union[M4ASquare1, M4ASquare2]
+            sample_ptr = f'square{voice.duty_cycle % 4}'
+            frequency = resample(sample_key, -4)
+        else:
+            voice: M4ANoise
+            sample_ptr = f'noise{voice.period}'
+            frequency = resample(sample_key)
+        return sample_ptr, frequency
+
+
+class Ticker(object):
+    """M4A engine tick clock.
+
+    Attributes
+    ----------
+    tick_ctr : int
+        Global tick counter.
+
+    """
+
+    def __init__(self):
+        self.tick_ctr = 0
+
+    def __call__(self) -> int:
+        """Execute one cycle of the tick clock."""
+        prev_ticks = int(self.tick_ctr)
+        average_ticks = M4ATrack.TEMPO / (TICKS_PER_SECOND / PLAYBACK_SPEED)
+        self.tick_ctr += average_ticks
+        ticks = int(self.tick_ctr - prev_ticks)
+        self.tick_ctr %= TICKS_PER_SECOND
+        return ticks

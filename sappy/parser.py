@@ -1,298 +1,356 @@
-#!python
 # -*- coding: utf-8 -*-
-# TODO: Either use the original FMOD dlls or find a sound engine.
-"""Main file."""
-import struct
-import typing
+"""Main self.file."""
+from collections import OrderedDict
+from logging import getLogger, DEBUG
+from typing import Union, Dict, List
 
-import sappy.config as config
-import sappy.engine as engine
-import sappy.fmod as fmod
-import sappy.romio as romio
-from sappy.cmdset import Command, Gate, Note, Wait, mxv
+from .cmd import (BEND, BENDR, EOT, FINE, GOTO, KEYSH, LFODL,
+                  LFOS, MEMACC, MOD, MODT, NOTE, PAN, PATT, PEND, PREV,
+                  PRIO, TEMPO, TUNE, VOICE, VOL, WAIT, XCMD)
+from .exceptions import (InvalidSongNumber, BlankSong, InvalidROM,
+                         UnknownCommand)
+from .inst_set import (GateArg, CMD, NoteCMD, WaitCMD, mxv, REPEATABLE)
+from .m4a import (M4ASong, MetaData, M4AVoice, M4ASample,
+                  M4ADirectSound,
+                  M4AWaveform, M4ANoise,
+                  M4ASquare2, M4ASquare1, M4AKeyZone, M4ADrum, M4ATrack)
+from .rom import GBARom
 
-to_addr = romio.to_addr
+LOGGER = getLogger(__name__)
+LOGGER.setLevel(DEBUG)
+
+
+# TODO: Implement argument parser handler
+class SingleArgumentHandler(object):
+    pass
 
 
 class Parser(object):
-    """Parser/interpreter for Sappy code."""
+    """Intermediary for translating M4A data into Python constructs.
 
-    def get_sample(self, song: engine.Song, voice: engine.Voice) -> None:
-        """Load voice sample from ROM."""
-        voice_sample = voice.sample_ptr
-        voice_ptr = to_addr(voice_sample)
-        if voice_ptr == -1:
-            return
-        smp_head = self.file.read_sample(voice_ptr)
+    Parameters
+    ----------
+    path : str
+        File path to ROM.
 
-        if voice.type == engine.SampleType.DSOUND:
-            data = memoryview(bytes(self.file._file.read(smp_head.size)))
-            sample = engine.Sample(
-                sample_data=data,
-                freq=smp_head.frequency >> 10,
-                loops=smp_head.is_looped == 0x40,
-                loop_start=smp_head.loop,
-                size=smp_head.size,
-            )
-        else:
-            wave_data = self.file.read_string(config.PSG_WAVEFORM_SIZE, voice_ptr)
-            data = []
-            for byte_ind in range(32):
-                wave_ind, power = divmod(byte_ind, 2)
-                byte = ord(wave_data[wave_ind]) / (16 ** power) % 16
-                byte *= config.PSG_WAVEFORM_VOLUME
-                data.append(int(byte))
-            sample = engine.Sample(
-                size=config.PSG_WAVEFORM_SIZE,
-                freq=config.PSG_WAVEFORM_FREQUENCY,
-                sample_data=data,
-                is_wave=True
-            )
+    Attributes
+    ----------
+    file : GBARom
+        Open file instance for read access.
+    voices : set
+        Global list of all voices used by an M4A song.
 
-        song.samples.setdefault(voice_sample, sample)
+    """
 
-    def get_loop_ptr(self, program_ctr: int):
-        """Get loop address of GOTO call."""
-        cmd = 0
-        while True:
-            self.file.address = program_ctr
-            cmd = self.file.read()
-            program_ctr += 1
-            if Wait.W00 <= cmd <= Wait.W96: # Wxx
-                continue
-            elif cmd == Command.PATT: # PATT(ADDRESS) [NON-REPEATABLE]
-                program_ctr += 4
-            elif cmd == Command.PEND: # PEND [NON-REPEATABLE]
-                program_ctr += 4
-            elif cmd == Command.GOTO: # GOTO(ADDRESS) [NON-REPEATABLE]
-                program_ctr += 4
-                loop_offset = self.file.read_gba_ptr()
-                break
-            elif Command.PRIO <= cmd <= Command.TUNE: # cmd(ARG) [REPEATABLE]
-                program_ctr += 1
-            elif cmd == Command.REPT: # REPT(COUNT, ADDRESS) [REPEATBLE]
-                program_ctr += 5
-            elif cmd == Command.MEMACC: # MEMACC(MEMACC_COM, ADDRESS, DATA) [REPEATABLE]
-                program_ctr += 3
-            elif cmd == Command.XCMD:
-                program_ctr += 3
-            elif Note.EOT <= cmd <= Note.N96: # Nxx(KEY, [VELOCITY, [GROUP]])
-                while self.file.read() < 0x80:
-                    program_ctr += 1
-            elif 0 <= cmd < 128: # REPEAT LAST COMMAND
-                pass
-            elif cmd == Command.FINE or cmd == Command.PREV:
-                pass
-            else:
-                program_ctr += 1
+    def __init__(self, path):
+        self.file = GBARom(path)
+        self.voices = set()
 
-        return loop_offset
+    def load_track(self, program_ctr):
+        """Parses all M4A commands into Python constructs for later execution.
 
-    def load_voice(self, voice_type: int, voice_ptr: int):
-        """Load a M4A voice."""
-        if 0x01 <= voice_type <= 0x5 or 0x9 <= voice_type <= 0xD: # Is PSG
-            data = self.file.read_psg_instrument(voice_ptr, voice_type in (0x3, 0x0B))
-        else: # Anything else.
-            data = self.file.read_directsound(voice_ptr)
-        return engine.Voice(data)
+        Parameters
+        ----------
+        program_ctr : int
+            Starting address of track data.
 
-    def load_inst(self, song: engine.Song, table_ptr: int, voice_id: int, midi_key: int):
-        """Create an M4A voice surrogate."""
-        HAS_SAMPLE = (engine.SampleType.DSOUND, engine.SampleType.PSG_WAVE)
+        Returns
+        -------
+        M4ATrack
+            New track construct with parsed track data.
 
-        voice_ptr = table_ptr + voice_id * 12
-        voice_type = self.file.read(voice_ptr)
-        if voice_type == 0x80: # Percussion
-            voice_table = self.file.read_dword(self.file.address + 4)
-            midi_voice_ptr = to_addr(voice_table + midi_key * 12)
-            midi_voice_type = self.file.read(midi_voice_ptr)
-            voice = self.load_voice(midi_voice_type, midi_voice_ptr)
-            if voice_id not in song.voices:
-                song.voices[voice_id] = engine.DrumKit({midi_key: voice})
-            else:
-                song.voices[voice_id].voice_table[midi_key] = voice
-        elif voice_type == 0x40: # Multi
-            voice_table = self.file.read_dword(self.file.address + 4)
-            keymap_ptr = to_addr(self.file.read_dword())
-            midi_note = self.file.read(keymap_ptr + midi_key)
-            midi_voice_ptr = to_addr(voice_table + midi_note * 12)
-            midi_voice_type = self.file.read(midi_voice_ptr)
-            voice = self.load_voice(midi_voice_type, midi_voice_ptr)
-            if voice_id not in song.voices:
-                song.voices[voice_id] = engine.Instrument({midi_note: voice}, {midi_key: midi_note})
-            else:
-                song.voices[voice_id].voice_table[midi_note] = voice
-                song.voices[voice_id].keymap[midi_key] = midi_note
-        else: # Everything else
-            if voice_id in song.voices:
-                return
-            voice = self.load_voice(voice_type, voice_ptr)
-            song.voices[voice_id] = voice
-        if voice.type in HAS_SAMPLE:
-            self.get_sample(song, voice)
+        """
+        last_cmd = CMD.VOL
+        last_note = 0
+        last_velocity = 0
+        last_ext = 0
+        track_data: OrderedDict = OrderedDict()
 
-    def load_tracks(self, main_ptr: int, table_ptr: int, num_tracks: int) -> engine.Track:
-        """Load all track data for a song."""
-        song = engine.Song()
+        self.file.address = program_ctr
+        done: bool = False
+        while not done:
 
-        keysh = 0
+            cmd_pos = self.file.address
+            byte = self.file.read()
+            command = None
+
+            if byte in REPEATABLE or NoteCMD.TIE <= byte <= NoteCMD.N96:
+                last_cmd = byte
+
+            if WaitCMD.W00 <= byte <= WaitCMD.W96:
+                command = WAIT(byte)
+            elif byte == CMD.FINE:
+                command = FINE()
+                done = True
+            elif byte == CMD.GOTO:
+                loop_ptr = self.file.read_gba_ptr()
+                command = GOTO(loop_ptr)
+            elif byte == CMD.PATT:
+                address = self.file.read_gba_ptr()
+                command = PATT(address)
+            elif byte == CMD.PEND:
+                command = PEND()
+            elif byte == CMD.PREV:
+                command = PREV()
+                done = True
+            elif byte == CMD.MEMACC:
+                op_code = self.file.read()
+                address = self.file.read()
+                data = self.file.read()
+                command = MEMACC(op_code, address, data)
+            elif byte == CMD.PRIO:
+                command = PRIO(self.file.read())
+            elif byte == CMD.TEMPO:
+                command = TEMPO(self.file.read())
+            elif byte == CMD.KEYSH:
+                data = self.file.read_signed()
+                command = KEYSH(data)
+            elif byte == CMD.VOICE:
+                voice_id = self.file.read()
+                self.voices.add(voice_id)
+                command = VOICE(voice_id)
+            elif byte == CMD.VOL:
+                command = VOL(self.file.read())
+            elif byte == CMD.PAN:
+                command = PAN(self.file.read())
+            elif byte == CMD.BEND:
+                command = BEND(self.file.read())
+            elif byte == CMD.BENDR:
+                command = BENDR(self.file.read())
+            elif byte == CMD.LFOS:
+                command = LFOS(self.file.read())
+            elif byte == CMD.LFODL:
+                command = LFODL(self.file.read())
+            elif byte == CMD.MOD:
+                command = MOD(self.file.read())
+            elif byte == CMD.MODT:
+                command = MODT(self.file.read())
+            elif byte == CMD.TUNE:
+                command = TUNE(self.file.read())
+            elif byte == CMD.XCMD:
+                last_ext = self.file.read()
+                arg = self.file.read()
+                command = XCMD(last_ext, arg)
+            elif byte == NoteCMD.EOT:
+                note = self.file.read()
+                if note <= mxv:
+                    command = EOT(note)
+                else:  # ALL SUSTAINED OFF
+                    command = EOT()
+                    self.file.address -= 1
+            elif NoteCMD.TIE <= byte <= NoteCMD.N96:
+                o = self.file.address
+                note = self.file.read()
+                velocity = self.file.read()
+                gate = self.file.read()
+                self.file.address = o
+                if note <= mxv:
+                    last_note = self.file.read()
+                    if velocity <= mxv:
+                        last_velocity = self.file.read()
+                        if GateArg.gtp1 <= gate <= GateArg.gtp3:
+                            self.file.address += 1
+                if not GateArg.gtp1 <= gate <= GateArg.gtp3:
+                    gate = None
+                note_cmd = NOTE(byte, last_note, last_velocity, gate)
+                command = note_cmd
+            elif 0 <= byte <= mxv:
+                if last_cmd == CMD.VOICE:
+                    voice_id = byte
+                    self.voices.add(voice_id)
+                    command = VOICE(byte)
+                elif last_cmd == CMD.VOL:
+                    command = VOL(byte)
+                elif last_cmd == CMD.PAN:
+                    command = PAN(byte)
+                elif last_cmd == CMD.BEND:
+                    command = BEND(byte)
+                elif last_cmd == CMD.BENDR:
+                    command = BENDR(byte)
+                elif last_cmd == CMD.LFOS:
+                    command = LFOS(byte)
+                elif last_cmd == CMD.LFODL:
+                    command = LFODL(byte)
+                elif last_cmd == CMD.MOD:
+                    command = MOD(byte)
+                elif last_cmd == CMD.MODT:
+                    command = MODT(byte)
+                elif last_cmd == CMD.TUNE:
+                    command = TUNE(byte)
+                elif last_cmd == NoteCMD.EOT:
+                    command = EOT(byte)
+                elif last_cmd == CMD.XCMD:
+                    command = XCMD(last_ext, byte)
+                elif NoteCMD.N96 >= last_cmd >= NoteCMD.TIE:
+                    o = self.file.address
+                    last_note = byte
+                    velocity = self.file.read()
+                    gate = self.file.read()
+                    self.file.address = o
+                    if velocity <= mxv:
+                        last_velocity = self.file.read()
+                        if GateArg.gtp1 <= gate <= GateArg.gtp3:
+                            self.file.address += 1
+                    if not GateArg.gtp1 <= gate <= GateArg.gtp3:
+                        gate = None
+                    note_cmd = NOTE(last_cmd, last_note, last_velocity,
+                                    gate)
+                    command = note_cmd
+                else:
+                    raise UnknownCommand(byte)
+            track_data[cmd_pos] = command
+        return M4ATrack(track_data)
+
+    def load_tracks(self, song_ptr, num_tracks):
+        """Load an M4A song entry's command data.
+
+        Parameters
+        ----------
+        song_ptr : int
+            Pointer to the M4A song entry.
+        num_tracks : int
+            Number of tracks in the M4A song entry.
+
+        Returns
+        -------
+        List[M4ATrack]
+            List of track constructs in ascending load order.
+
+        """
+        tracks = []
+
         for track_num in range(num_tracks):
-            track = engine.Track()
-            track.priority = num_tracks - track_num
-            track_pos = self.file.read_gba_ptr(main_ptr + 8 + track_num * 4)
-            loop_ptr = self.get_loop_ptr(track_pos)
+            start_address = self.file.read_gba_ptr(song_ptr + 8 + track_num * 4)
+            self.file.reset()
+            track = self.load_track(start_address)
+            tracks.append(track)
+        return tracks
 
-            last_cmd = None
-            last_key = None
-            last_velocity = None
-            last_group = None
-            last_ext = None
-            voice = 0
-            last_midi_key = 1
-            in_patt = False
-            track_data = track.track_data
-            while True:
-                self.file.address = track_pos
-                if track_pos >= loop_ptr and track.loop_ptr == -1 and loop_ptr != -1:
-                    track.loop_ptr = len(track_data)
+    def load_voices(self, table_ptr):
+        """Create `M4AVoice` constructs from the ROM voice table.
 
-                cmd = self.file.read()
-                if Command.PRIO <= cmd <= Command.TUNE:
-                    arg = self.file.read()
-                    if cmd == Command.KEYSH:
-                        keysh = arg
-                    elif Command.VOICE <= cmd <= Command.TUNE:
-                        if cmd == Command.VOICE:
-                            last_cmd = cmd
-                            voice = arg
-                            self.load_inst(song, table_ptr, voice, last_midi_key)
-                        last_cmd = cmd
-                    track_data.append(engine.Command(cmd, arg))
-                    track_pos += 2
-                elif cmd == Command.MEMACC:
-                    op = self.file.read()
-                    addr = self.file.read()
-                    data = self.file.read()
-                    track_data.append(engine.Command(cmd, op, addr, data))
-                    track_pos += 4
-                elif cmd == Command.PEND:
-                    if in_patt:
-                        track_pos = rpc  # pylint: disable=E0601
-                        in_patt = False
-                    else:
-                        track_pos += 1
-                    track_data.append(engine.Command(cmd))
-                elif cmd == Command.PATT:
-                    rpc = track_pos + 5
-                    in_patt = True
-                    track_pos = self.file.read_gba_ptr()
-                    track_data.append(engine.Command(cmd))
-                elif cmd == Command.XCMD:
-                    last_cmd = cmd
-                    ext = self.file.read()
-                    arg = self.file.read()
-                    last_ext = ext
-                    track_data.append(engine.Command(cmd, ext, arg))
-                    track_pos += 3
-                elif cmd == Note.EOT:
-                    last_cmd = cmd
-                    arg = self.file.read()
-                    track_pos += 1
-                    if arg <= mxv:
-                        track_pos += 1
-                        track_data.append(engine.Command(cmd, arg))
-                    else:
-                        track_data.append(engine.Command(cmd, 0))
-                elif 0x00 <= cmd < 0x80 or Note.TIE <= cmd <= Note.N96:
-                    if Note.TIE <= cmd <= Note.N96:
-                        track_pos += 1
-                        last_cmd = cmd
-                    else:
-                        if last_cmd <= Note.EOT:
-                            if last_cmd == Note.EOT:
-                                track_data.append(engine.Command(last_cmd, cmd))
-                            elif last_cmd == Command.VOICE:
-                                voice = cmd
-                                self.load_inst(song, table_ptr, voice, last_midi_key)
-                                track_data.append(engine.Command(last_cmd, voice))
-                            elif last_cmd == Command.XCMD:
-                                track_data.append(engine.Command(last_cmd, last_ext, cmd))
-                            else:
-                                track_data.append(engine.Command(last_cmd, cmd))
-                            track_pos += 1
-                            continue
-                        else:
-                            cmd = last_cmd
+        Do **NOT** use unless `load_tracks` has been called first.
 
-                    self.file.address = track_pos
-                    note = self.file.read()
-                    if note <= mxv:
-                        last_key = note
-                        track_pos += 1
-                        velocity = self.file.read()
-                        if velocity <= mxv:
-                            last_velocity = velocity
-                            track_pos += 1
-                            group = self.file.read()
-                            if group <= Gate.gtp3:
-                                last_group = group
-                                track_pos += 1
-                            elif group > mxv:
-                                group = last_group
-                        else:
-                            velocity = last_velocity
-                            group = last_group
-                        last_midi_key = note + keysh
-                    else:
-                        last_midi_key = last_key + keysh
-                        velocity, group = last_velocity, last_group
-                    track_data.append(engine.Command(cmd, last_midi_key, velocity, group))
+        Parameters
+        ----------
+        table_ptr : int
+            Pointer to voice table.
 
-                    self.load_inst(song, table_ptr, voice, last_midi_key)
-                elif Wait.W00 <= cmd <= Wait.W96:
-                    track_data.append(engine.Command(cmd))
-                    track_pos += 1
-                if cmd in (Command.FINE, Command.GOTO, Command.PREV):
-                    break
+        Returns
+        -------
+        Dict[int, M4AVoice]
+            Dictionary of voice constructs linked by voice ID.
 
-            track_data.append(engine.Command(cmd))
-            song.tracks.append(track)
-        return song
+        """
+        voices = {}
+        self.file.reset()
+        for voice_id in self.voices:
+            voice = self.file.load_voice(table_ptr, voice_id)
+            voices[voice_id] = voice
+        return voices
 
-    def load_song(self, path: str, song: int, song_table_ptr: int = None) -> engine.Song:
-        """Load a song from ROM."""
-        self.file = romio.GBARom(path)
+    def load_samples(self, voices):
+        """Create `M4ASample` constructs from ROM sample data based on loaded
+        voices.
+
+        Notes
+        -----
+            The sample dictionary uses sample pointers to link only DirectSound
+            and PSG Waveform samples. Square1/Square2 and Noise samples are
+            linked using strings that denote their duty cycles and periods,
+            respectively.
+
+        Parameters
+        ----------
+        voices : Dict[int, M4AVoice]
+            Dictionary of voice constructs linked by voice ID.
+
+        Returns
+        -------
+        Dict[Union[int, str], M4ASample]
+            Dictionary of sample constructs linked by sample pointer.
+
+        """
+        samples = {}
+        self.file.reset()
+        for voice in voices.values():
+            if voice.mode in (0x0, 0x8, 0x3, 0xB):
+                voice: Union[M4ADirectSound, M4AWaveform]
+            elif voice.mode not in (0x40, 0x80):
+                voice: Union[M4ASquare1, M4ASquare2, M4ANoise]
+            else:
+                voice: Union[M4ADrum, M4AKeyZone]
+                sub_samples = self.load_samples(voice.voice_table)
+                samples.update(sub_samples)
+                continue
+            key = voice.sample_ptr
+            if key in samples:
+                continue
+            sample = self.file.load_sample(voice)
+            if sample is None:
+                continue
+            samples[key] = sample
+        return samples
+
+    def load_song(self, song_id, song_table_ptr=None):
+        """Create an `M4ASong` construct from an entry in the ROM song table.
+
+        Parameters
+        ----------
+        song_id : int
+            Song entry number.
+        song_table_ptr : int, optional
+            Pointer to song table.
+
+        Returns
+        -------
+        M4ASong
+            Song construct with sample, voice, and track command data.
+
+        Raises
+        ------
+        InvalidROM
+            If the `GBARom` search algorithm does not find a valid song table
+            pointer.
+        InvalidSongNumber
+            If the song number refers to a non-existent/out-of-bounds song
+            entry.
+        BlankSong
+            If the song has no tracks.
+
+        """
 
         if song_table_ptr is None:
             song_table_ptr = self.file.get_song_table()
             if song_table_ptr == -1:
-                return -1
+                raise InvalidROM()
 
-        main_ptr = self.file.read_gba_ptr(song_table_ptr + song * 8)
-        if main_ptr == -1:
-            return -2
+        song_ptr = self.file.read_gba_ptr(song_table_ptr + song_id * 8)
+        if song_ptr == -1:
+            raise InvalidSongNumber(song_id)
 
-        num_tracks = self.file.read(main_ptr)
+        num_tracks = self.file.read(song_ptr)
         if num_tracks == 0:
-            return -3
+            raise BlankSong()
 
         unk = self.file.read()
         priority = self.file.read()
         reverb = self.file.read()
         voice_table_ptr = self.file.read_gba_ptr()
-        game_name = self.file.read_string(12, 0xA0)
-        game_code = self.file.read_string(4, 0xAC)
 
-        song = self.load_tracks(main_ptr, voice_table_ptr, num_tracks)
-        song.meta_data = engine.MetaData(
-            rom_code=game_code,
-            rom_name=game_name,
+        tracks = self.load_tracks(song_ptr, num_tracks)
+        voices = self.load_voices(voice_table_ptr)
+        samples = self.load_samples(voices)
+        sdm = self.file.get_sdm()
+        meta_data = MetaData(
+            rom_code=self.file.code,
+            rom_name=self.file.name,
             tracks=num_tracks,
             reverb=reverb,
             priority=priority,
-            main_ptr=main_ptr,
+            main_ptr=song_ptr,
             voice_ptr=voice_table_ptr,
             song_ptr=song_table_ptr,
             unknown=unk)
-
+        song = M4ASong(tracks, voices, samples, meta_data, sdm)
         return song

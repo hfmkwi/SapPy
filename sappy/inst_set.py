@@ -1,22 +1,33 @@
 # -*- coding: utf-8 -*-
-"""MusicPlayDef.s instruction set."""
-import enum
+"""MusicPlayDef.s instruction set.
 
-__all__ = ('mxv', 'c_v', 'reverb_set', 'Wait', 'Command', 'Note', 'Key',
-           'Velocity', 'Gate', 'Mod', 'MemAcc')
+Attributes
+----------
+    mxv : int
+        Maximum value of all arguments
 
-# Max value of operators
+    c_v : int
+        Center value for commands PAN, BEND, and TUNE
+
+    reverb_set : int
+        SOUND_MODE_REVERB_SET (Unknown functionality)
+
+"""
+from enum import IntEnum
+
 mxv = 0x7F
-
-# Center value of PAN, BEND, TUNE
 c_v = 0x40
-
-# SOUND_MODE_REVERB_SET
 reverb_set = 0x80
 
 
-# Sound independent
-class Wait(enum.IntEnum):
+class WaitCMD(IntEnum):
+    """Possible wait commands.
+
+    Each command resets the tracks tick counter to the number specified in the
+    command and acts as a break from command execution until the track counter
+    reaches 0.
+
+    """
     W00 = 0x80
     W01 = W00 + 1
     W02 = W00 + 2
@@ -68,37 +79,53 @@ class Wait(enum.IntEnum):
     W96 = W00 + 48
 
 
-class Command(enum.IntEnum):
-    FINE = 0xB1  # fine
-    GOTO = 0xB2  # goto
-    PATT = 0xB3  # pattern play
-    PEND = 0xB4  # pattern end
-    REPT = 0xB5  # repeat
-    PREV = 0xB6  # fine and goto previous song
-    MEMACC = 0xB9  # memacc(op, adr, dat)
-    PRIO = 0xBA  # priority
-    TEMPO = 0xBB  # tempo (BPM/2)
-    KEYSH = 0xBC  # key shift
+class CMD(IntEnum):
+    """Possible executable M4A commands.
 
-    VOICE = 0xBD  # voice #
-    VOL = 0xBE  # volume
-    PAN = 0xBF  # panpot (c_v+xx)
-    BEND = 0xC0  # pitch bend (c_v+xx)
-    BENDR = 0xC1  # pitch bend range
+    These commands provide the basic functionality that allows the M4A engine
+    to function as a pseudo-MOD tracker.
+
+    """
+    FINE = 0xB1  # end track data
+    GOTO = 0xB2  # goto cmd@address (unconditional jump)
+    PATT = 0xB3  # play pattern@address
+    PEND = 0xB4  # end pattern block
+    REPT = 0xB5  # repeat cmd@address n times (unconditional jump)
+    PREV = 0xB6  # end track data and goto previous song
+    MEMACC = 0xB9  # modify song memory location
+    PRIO = 0xBA  # change track priority
+    TEMPO = 0xBB  # change ticks/second executed
+    KEYSH = 0xBC  # modify track key-shift
+
+    VOICE = 0xBD  # track voice
+    VOL = 0xBE  # track volume
+    PAN = 0xBF  # track panning
+    BEND = 0xC0  # track pitch-bend (dependent on BENDR)
+    BENDR = 0xC1  # track pitch-range
     LFOS = 0xC2  # LFO speed
     LFODL = 0xC3  # LFO delay
     MOD = 0xC4  # modulation depth
     MODT = 0xC5  # modulation type
     TUNE = 0xC8  # micro-tuning (c_v+<xx>)
 
-    XCMD = 0xCD  # extend command
+    XCMD = 0xCD  # extension command
     xIECV = 0x08  # pseudo echo volume
     xIECL = 0x09  # pseudo echo length
 
     PAM = PAN
 
 
-class Note(enum.IntEnum):
+class NoteCMD(IntEnum):
+    """Possible note commands.
+
+    Each ticked note command (denoted N<xx>) creates a note under the parent
+    track with an independent tick counter. However, all notes operate their
+    tick counters using the global tick clock.
+
+    Notes executed using the TIE command have an indefinite length and are
+    stopped by executing EOT.
+
+    """
     EOT = 0xCE  # End of Tie
     TIE = 0xCF
     N01 = TIE + 1
@@ -151,7 +178,12 @@ class Note(enum.IntEnum):
     N96 = N01 + 47
 
 
-class Key(enum.IntEnum):
+class KeyArg(IntEnum):
+    """Possible MIDI key arguments for all note commands.
+
+    The M4A engine allows for notes in the range C-2 - G8.
+
+    """
     CnM2 = 0
     CsM2 = 1
     DnM2 = 2
@@ -282,7 +314,12 @@ class Key(enum.IntEnum):
     Gn8 = 127
 
 
-class Velocity(enum.IntEnum):
+class VelocityArg(IntEnum):
+    """Possible velocities for all note commands.
+
+    The M4A engine supports velocities from 0 - 127.
+
+    """
     v000 = 0
     v001 = 1
     v002 = 2
@@ -352,7 +389,7 @@ class Velocity(enum.IntEnum):
     v066 = 66
     v067 = 67
     v068 = 68
-    v069 = 79
+    v069 = 69
     v070 = 70
     v071 = 71
     v072 = 72
@@ -413,19 +450,27 @@ class Velocity(enum.IntEnum):
     v127 = 127
 
 
-class Gate(enum.IntEnum):
+class GateArg(IntEnum):
+    """Possible gates for all ticked note commands.
+
+    Gate is an optional argument appended to the end of a ticked note command
+    which adds 1-3 ticks to the note's length, allowing for finer control.
+
+    """
     gtp1 = 1
     gtp2 = 2
     gtp3 = 3
 
 
-class Mod(enum.IntEnum):
+class ModArg(IntEnum):
+    """Possible arguments for the MOD command."""
     mod_vib = 0  # vibrato
     mod_tre = 1  # tremolo
     mod_pan = 2  # auto-panpot
 
 
-class MemAcc(enum.IntEnum):
+class MemAccArg(IntEnum):
+    """Possible sub-commands for the MEMACC command."""
     mem_set = 0
     mem_add = 1
     mem_sub = 2
@@ -444,3 +489,9 @@ class MemAcc(enum.IntEnum):
     mem_mem_bhs = 15
     mem_mem_bls = 16
     mem_mem_blo = 17
+
+
+REPEATABLE = [
+    CMD.VOICE, CMD.VOL, CMD.PAN, CMD.BEND, CMD.BENDR, CMD.MOD, CMD.TUNE,
+    CMD.XCMD, NoteCMD.EOT
+]
